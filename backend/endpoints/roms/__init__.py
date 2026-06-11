@@ -1036,6 +1036,20 @@ async def get_rom_content(
                     m3u_info.compress_type = ZIP_STORED
                     zip_file.writestr(m3u_info, m3u_encoded_content)
 
+                # Recreate noload.txt so ES-DE skips the subfolder on re-import
+                if (
+                    not hidden_folder
+                    and rom.fs_extension
+                    and rom.fs_extension.lower() == "m3u"
+                ):
+                    noload_info = ZipInfo(
+                        filename=f"{rom.fs_name_no_ext}/noload.txt",
+                        date_time=now.timetuple()[:6],
+                    )
+                    noload_info.external_attr = S_IFREG | 0o600
+                    noload_info.compress_type = ZIP_STORED
+                    zip_file.writestr(noload_info, b"")
+
             # Get the completed ZIP file bytes
             zip_buffer.seek(0)
             return zip_buffer.getvalue()
@@ -1079,6 +1093,22 @@ async def get_rom_content(
             filename=f"{rom.fs_name_no_ext}.m3u",
         )
         content_lines.append(m3u_line)
+
+    if (
+        not hidden_folder
+        and rom.fs_extension
+        and rom.fs_extension.lower() == "m3u"
+    ):
+        noload_content = b"\n"
+        noload_b64 = b64encode(noload_content).decode()
+        content_lines.append(
+            ZipContentLine(
+                crc32=crc32_to_hex(binascii.crc32(noload_content)),
+                size_bytes=len(noload_content),
+                encoded_location=f"/decode?value={noload_b64}",
+                filename=f"{rom.fs_name_no_ext}/noload.txt",
+            )
+        )
 
     return ZipResponse(
         content_lines=content_lines,

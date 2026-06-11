@@ -142,6 +142,8 @@ class RomFile(BaseModel):
         rom_prefix = self.rom.full_path
         if rom_prefix.lower().endswith(".m3u"):
             rom_prefix = f"{self.rom.fs_path}/{self.rom.fs_name_no_ext}"
+            replacement = ".hidden/" if hidden_folder else f"{self.rom.fs_name_no_ext}/"
+            return self.full_path.replace(f"{rom_prefix}/", replacement)
         return self.full_path.replace(
             f"{rom_prefix}/", ".hidden/" if hidden_folder else ""
         )
