@@ -751,9 +751,13 @@ class FSRomsHandler(FSHandler):
                 (_dir / "noload.txt").write_text("\n")
                 _m3u.write_text("\n".join(m3u_lines) + "\n")
 
-            await asyncio.to_thread(
-                _organize, abs_roms_path, dir_path, m3u_path, base_name, cue_list, all_files
-            )
+            try:
+                await asyncio.to_thread(
+                    _organize, abs_roms_path, dir_path, m3u_path, base_name, cue_list, all_files
+                )
+            except OSError as e:
+                log.warning(f"Failed to auto-organize {hl(base_name)}: {e}")
+                continue
             log.info(
                 f"Auto-organized {hl(base_name)} ({len(cue_list)} discs) "
                 f"→ {hl(f'{base_name}.m3u')}"
