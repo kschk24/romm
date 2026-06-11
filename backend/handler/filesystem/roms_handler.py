@@ -712,18 +712,15 @@ class FSRomsHandler(FSHandler):
         if not cue_files:
             return 0
 
-        # Group .cue files by base name (strip disc tag)
+        # Group .cue files by base name (strip disc tag if present)
         disc_groups: dict[str, list[str]] = {}
         for cue in cue_files:
             stem = Path(cue).stem
-            base = _DISC_TAG_RE.sub("", stem).strip()
-            if base and base != stem:  # only if a disc tag was present
-                disc_groups.setdefault(base, []).append(cue)
+            base = _DISC_TAG_RE.sub("", stem).strip() or stem
+            disc_groups.setdefault(base, []).append(cue)
 
         organized = 0
         for base_name, cue_list in disc_groups.items():
-            if len(cue_list) < 2:
-                continue
 
             m3u_path = abs_roms_path / f"{base_name}.m3u"
             dir_path = abs_roms_path / base_name
