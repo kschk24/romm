@@ -12,6 +12,8 @@ from typing import Any, TypedDict
 from anyio import Path as AnyioPath
 
 from config import LIBRARY_BASE_PATH
+from logger.formatter import highlight as hl
+from logger.logger import log
 from config.config_manager import (
     DEFAULT_EXCLUDED_EXTENSIONS,
     DEFAULT_EXCLUDED_FILES,
@@ -53,6 +55,11 @@ from .base_handler import (
 
 # PICO-8 cartridges are often stored as PNG files
 PICO8_CARTRIDGE_EXTENSION = ".p8.png"
+
+# Matches disc-number tags: "(Disc 1)", "[Disk 2]", "(Disc1)", etc.
+_DISC_TAG_RE: re.Pattern = re.compile(
+    r"\s*[\(\[]\s*dis[ck]\s*\d+\s*[\)\]]", re.IGNORECASE
+)
 
 
 NON_HASHABLE_PLATFORMS = frozenset(
@@ -682,6 +689,81 @@ class FSRomsHandler(FSHandler):
                 hashlib.sha1(usedforsecurity=False),
                 rom_sha1_h,
             )
+
+    async def auto_organize_loose_discs(self, platform: Platform) -> int:
+        """Detect loose multi-disc .cue files and restructure them into the
+        M3U + sibling-directory layout the scanner expects.
+
+        For each group of 2+ .cue files that share the same base name (after
+        stripping disc-number tags), creates:
+          <roms>/<Game Name>.m3u        — lists the disc .cue paths
+          <roms>/<Game Name>/           — contains all disc files + noload.txt
+
+        Returns the number of games reorganized.
+        """
+        rel_roms_path = self.get_roms_fs_structure(platform.fs_slug)
+        try:
+            abs_roms_path = self.validate_path(rel_roms_path)
+            all_files = await self.list_files(path=rel_roms_path)
+        except FileNotFoundError:
+            return 0
+
+        cue_files = [f for f in all_files if f.lower().endswith(".cue")]
+        if not cue_files:
+            return 0
+
+        # Group .cue files by base name (strip disc tag)
+        disc_groups: dict[str, list[str]] = {}
+        for cue in cue_files:
+            stem = Path(cue).stem
+            base = _DISC_TAG_RE.sub("", stem).strip()
+            if base and base != stem:  # only if a disc tag was present
+                disc_groups.setdefault(base, []).append(cue)
+
+        organized = 0
+        for base_name, cue_list in disc_groups.items():
+            if len(cue_list) < 2:
+                continue
+
+            m3u_path = abs_roms_path / f"{base_name}.m3u"
+            dir_path = abs_roms_path / base_name
+
+            if m3u_path.exists() or dir_path.exists():
+                continue  # already organized
+
+            def _organize(
+                _abs: Path,
+                _dir: Path,
+                _m3u: Path,
+                _base: str,
+                _cues: list[str],
+                _all: list[str],
+            ) -> None:
+                _dir.mkdir(parents=True, exist_ok=True)
+                m3u_lines: list[str] = []
+                for cue_name in sorted(_cues):
+                    cue_stem = Path(cue_name).stem
+                    # Move .cue and every same-stem sibling (e.g. .bin, .img)
+                    for sib in _all:
+                        if Path(sib).stem == cue_stem:
+                            src = _abs / sib
+                            dst = _dir / sib
+                            if src.exists() and not dst.exists():
+                                src.rename(dst)
+                    m3u_lines.append(f"{_base}/{cue_name}")
+                (_dir / "noload.txt").write_text("\n")
+                _m3u.write_text("\n".join(m3u_lines) + "\n")
+
+            await asyncio.to_thread(
+                _organize, abs_roms_path, dir_path, m3u_path, base_name, cue_list, all_files
+            )
+            log.info(
+                f"Auto-organized {hl(base_name)} ({len(cue_list)} discs) "
+                f"→ {hl(f'{base_name}.m3u')}"
+            )
+            organized += 1
+
+        return organized
 
     async def count_roms(self, platform: Platform) -> int:
         """Return the number of filesystem roms for a platform without

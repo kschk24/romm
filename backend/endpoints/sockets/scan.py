@@ -570,6 +570,10 @@ async def _identify_platform(
         new_firmware=new_firmware,
     )
 
+    organized = await fs_rom_handler.auto_organize_loose_discs(platform)
+    if organized:
+        log.info(f"Auto-organized {hl(str(organized))} multi-disc game(s) into M3U structure")
+
     try:
         fs_roms = await fs_rom_handler.get_roms(platform)
     except RomsNotFoundException as e:
