@@ -1048,7 +1048,7 @@ async def get_rom_content(
                     )
                     noload_info.external_attr = S_IFREG | 0o600
                     noload_info.compress_type = ZIP_STORED
-                    zip_file.writestr(noload_info, b"")
+                    zip_file.writestr(noload_info, b"\n")
 
             # Get the completed ZIP file bytes
             zip_buffer.seek(0)

@@ -330,6 +330,30 @@ async def _identify_rom(
             except FileNotFoundError:
                 pass
 
+    if should_update_files:
+        # Persist file entries before fetching metadata so they survive provider
+        # failures (e.g. IGDB 503) that would otherwise abort this function.
+        db_rom_handler.purge_rom_files(rom.id)
+
+        new_rom_files = [
+            RomFile(
+                rom_id=rom.id,
+                file_name=file.file_name,
+                file_path=file.file_path,
+                file_size_bytes=file.file_size_bytes,
+                last_modified=file.last_modified,
+                category=file.category,
+                crc_hash=file.crc_hash,
+                md5_hash=file.md5_hash,
+                sha1_hash=file.sha1_hash,
+                ra_hash=file.ra_hash,
+                chd_sha1_hash=file.chd_sha1_hash,
+            )
+            for file in fs_rom["files"]
+        ]
+        for new_rom_file in new_rom_files:
+            db_rom_handler.add_rom_file(new_rom_file)
+
     log.debug(f"Scanning {rom.fs_name}...")
     scanned_rom = await scan_rom(
         scan_type=scan_type,
@@ -365,30 +389,6 @@ async def _identify_rom(
                 }
             ),
         )
-
-    if should_update_files:
-        # Delete the existing rom files in the DB
-        db_rom_handler.purge_rom_files(_added_rom.id)
-
-        # Create each file entry for the rom
-        new_rom_files = [
-            RomFile(
-                rom_id=_added_rom.id,
-                file_name=file.file_name,
-                file_path=file.file_path,
-                file_size_bytes=file.file_size_bytes,
-                last_modified=file.last_modified,
-                category=file.category,
-                crc_hash=file.crc_hash,
-                md5_hash=file.md5_hash,
-                sha1_hash=file.sha1_hash,
-                ra_hash=file.ra_hash,
-                chd_sha1_hash=file.chd_sha1_hash,
-            )
-            for file in fs_rom["files"]
-        ]
-        for new_rom_file in new_rom_files:
-            db_rom_handler.add_rom_file(new_rom_file)
 
     # Short circuit if the scan type is hashes
     if scan_type == ScanType.HASHES:
