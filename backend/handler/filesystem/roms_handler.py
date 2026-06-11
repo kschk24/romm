@@ -581,6 +581,28 @@ class FSRomsHandler(FSHandler):
                 )
             )
 
+        # For flat .cue ROMs: include same-stem .bin/.img siblings as download
+        # parts. These files are suppressed in get_roms() to avoid appearing as
+        # standalone ROM entries.
+        if rom_ext == ".cue":
+            cue_stem = Path(rom.fs_name).stem
+            for _, sib_name in iter_files(abs_fs_path, recursive=False):
+                sib_ext = Path(sib_name).suffix.lower()
+                if sib_ext in (".bin", ".img") and Path(sib_name).stem == cue_stem:
+                    rom_files.append(
+                        self._build_rom_file(
+                            rom=rom,
+                            rom_path=Path(rel_roms_path),
+                            file_name=sib_name,
+                            file_hash=FileHash(
+                                crc_hash="",
+                                md5_hash="",
+                                sha1_hash="",
+                                chd_sha1_hash="",
+                            ),
+                        )
+                    )
+
         return ParsedRomFiles(
             rom_files=rom_files,
             crc_hash=crc32_to_hex(rom_crc_c) if rom_crc_c != DEFAULT_CRC_C else "",
@@ -676,14 +698,23 @@ class FSRomsHandler(FSHandler):
         filtered_multi = self.exclude_multi_roms(fs_multi_roms)
         multi_dir_set = set(filtered_multi)
 
+        # .bin/.img files whose stem matches a .cue in the same dir are file
+        # parts of that .cue ROM, not standalone ROMs.
+        cue_stems: set[str] = {
+            Path(f).stem for f in filtered_single if f.lower().endswith(".cue")
+        }
+
         m3u_paired_dirs: set[str] = set()
         paired_count = 0
         unpaired_single_count = 0
         for file_name in filtered_single:
             stem = Path(file_name).stem
+            ext = Path(file_name).suffix.lower()
             if file_name.lower().endswith(".m3u") and stem in multi_dir_set:
                 m3u_paired_dirs.add(stem)
                 paired_count += 1
+            elif ext in (".bin", ".img") and stem in cue_stems:
+                pass  # suppressed — part of the paired .cue ROM
             else:
                 unpaired_single_count += 1
 
@@ -712,6 +743,12 @@ class FSRomsHandler(FSHandler):
         filtered_multi = self.exclude_multi_roms(fs_multi_roms)
         multi_dir_set = set(filtered_multi)
 
+        # .bin/.img files whose stem matches a .cue in the same dir are file
+        # parts of that .cue ROM, not standalone ROMs.
+        cue_stems: set[str] = {
+            Path(f).stem for f in filtered_single if f.lower().endswith(".cue")
+        }
+
         # M3U files that have a matching sibling directory are treated as one
         # logical ROM: the .m3u is the entry point; the directory holds the
         # actual disc images.  Emit a single nested FSRom and suppress the
@@ -721,11 +758,14 @@ class FSRomsHandler(FSHandler):
         unpaired_single: list[str] = []
         for file_name in filtered_single:
             stem = Path(file_name).stem
+            ext = Path(file_name).suffix.lower()
             if file_name.lower().endswith(".m3u") and stem in multi_dir_set:
                 m3u_paired_dirs.add(stem)
                 paired_entries.append(
                     {"fs_name": file_name, "flat": False, "nested": True}
                 )
+            elif ext in (".bin", ".img") and stem in cue_stems:
+                pass  # suppressed — part of the paired .cue ROM
             else:
                 unpaired_single.append(file_name)
 

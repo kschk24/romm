@@ -32,14 +32,15 @@ ROMM_USER_CONFIG_PATH: Final = f"{ROMM_BASE_PATH}/config"
 ROMM_USER_CONFIG_FILE: Final = f"{ROMM_USER_CONFIG_PATH}/config.yml"
 SQLITE_DB_BASE_PATH: Final = f"{ROMM_BASE_PATH}/database"
 DEFAULT_EXCLUDED_EXTENSIONS: Final = [
-    "db",
-    "ini",
-    "tmp",
+    "assembling",  # Syncthing in-progress transfer
     "bak",
-    "lock",
-    "log",
     "cache",
     "crdownload",
+    "db",
+    "ini",
+    "lock",
+    "log",
+    "tmp",
 ]
 DEFAULT_EXCLUDED_FILES: Final = [
     ".DS_Store",
