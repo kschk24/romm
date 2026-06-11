@@ -6,7 +6,20 @@ from io import BytesIO
 from stat import S_IFREG
 from typing import Annotated, Any, Sequence
 from urllib.parse import quote
+import zipfile as _zipfile_mod
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile, ZipInfo
+
+# CPython 3.13.12 (uv build) changed _get_compressor to take compress_level
+# as a keyword-only argument, but _ZipWriteFile.__init__ still passes it
+# positionally → TypeError. Patch the module global so the lookup in
+# _ZipWriteFile.__init__ finds a 2-positional-arg-safe wrapper.
+try:
+    _zipfile_mod._get_compressor(_zipfile_mod.ZIP_STORED, None)
+except TypeError:
+    _real_get_compressor = _zipfile_mod._get_compressor
+    _zipfile_mod._get_compressor = (
+        lambda compress_type, compresslevel=None: _real_get_compressor(compress_type)
+    )
 
 import pydash
 from anyio import Path, open_file
@@ -993,35 +1006,41 @@ async def get_rom_content(
             )
 
         async def build_zip_in_memory() -> bytes:
-            # Initialize in-memory buffer
+            # Phase 1: read all files async before touching ZipFile.
+            # Mixing await with the synchronous ZipFile context manager
+            # leaves _writing=True if the event loop intervenes, causing
+            # "Can't close the ZIP file while there is an open writing handle".
+            FileEntry = tuple[str, bytes, int]
+            file_entries: list[FileEntry] = []
+            for file in files:
+                file_path = f"{LIBRARY_BASE_PATH}/{file.full_path}"
+                try:
+                    async with await open_file(file_path, "rb") as f:
+                        content = await f.read()
+                except FileNotFoundError:
+                    log.error(f"File {hl(file_path)} not found!")
+                    raise
+                file_entries.append((
+                    file.file_name_for_download(hidden_folder),
+                    content,
+                    file.file_size_bytes or 0,
+                ))
+
+            # Phase 2: build ZIP synchronously — no await inside this block.
             zip_buffer = BytesIO()
             now = datetime.now()
 
             with ZipFile(zip_buffer, "w") as zip_file:
-                # Add content files
-                for file in files:
-                    file_path = f"{LIBRARY_BASE_PATH}/{file.full_path}"
-                    try:
-                        # Read entire file into memory
-                        async with await open_file(file_path, "rb") as f:
-                            content = await f.read()
-
-                        # Create ZIP info with compression
-                        zip_info = ZipInfo(
-                            filename=file.file_name_for_download(hidden_folder),
-                            date_time=now.timetuple()[:6],
-                        )
-                        zip_info.external_attr = S_IFREG | 0o600
-                        zip_info.compress_type = (
-                            ZIP_DEFLATED if file.file_size_bytes > 0 else ZIP_STORED
-                        )
-
-                        # Write file to ZIP
-                        zip_file.writestr(zip_info, content)
-
-                    except FileNotFoundError:
-                        log.error(f"File {hl(file_path)} not found!")
-                        raise
+                for arcname, content, size_bytes in file_entries:
+                    zip_info = ZipInfo(
+                        filename=arcname,
+                        date_time=now.timetuple()[:6],
+                    )
+                    zip_info.external_attr = (S_IFREG | 0o644) << 16
+                    zip_info.compress_type = (
+                        ZIP_DEFLATED if size_bytes > 0 else ZIP_STORED
+                    )
+                    zip_file.writestr(zip_info, content)
 
                 # Add M3U file if not already present
                 if not rom.has_m3u_file():
@@ -1032,7 +1051,7 @@ async def get_rom_content(
                     m3u_info = ZipInfo(
                         filename=m3u_filename, date_time=now.timetuple()[:6]
                     )
-                    m3u_info.external_attr = S_IFREG | 0o600
+                    m3u_info.external_attr = (S_IFREG | 0o644) << 16
                     m3u_info.compress_type = ZIP_STORED
                     zip_file.writestr(m3u_info, m3u_encoded_content)
 
@@ -1046,12 +1065,10 @@ async def get_rom_content(
                         filename=f"{rom.fs_name_no_ext}/noload.txt",
                         date_time=now.timetuple()[:6],
                     )
-                    noload_info.external_attr = S_IFREG | 0o600
+                    noload_info.external_attr = (S_IFREG | 0o644) << 16
                     noload_info.compress_type = ZIP_STORED
                     zip_file.writestr(noload_info, b"\n")
 
-            # Get the completed ZIP file bytes
-            zip_buffer.seek(0)
             return zip_buffer.getvalue()
 
         zip_data = await build_zip_in_memory()
