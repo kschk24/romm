@@ -264,6 +264,15 @@ class FSRomsHandler(FSHandler):
 
         return kept_roms
 
+    @staticmethod
+    def _cue_stems(filtered_single: list[str]) -> set[str]:
+        """Return stems of all .cue files in filtered_single.
+
+        Used to suppress same-stem .bin/.img siblings from appearing as
+        standalone ROM entries.
+        """
+        return {Path(f).stem for f in filtered_single if f.lower().endswith(".cue")}
+
     def _build_rom_file(
         self,
         rom: Rom,
@@ -781,11 +790,7 @@ class FSRomsHandler(FSHandler):
         filtered_multi = self.exclude_multi_roms(fs_multi_roms)
         multi_dir_set = set(filtered_multi)
 
-        # .bin/.img files whose stem matches a .cue in the same dir are file
-        # parts of that .cue ROM, not standalone ROMs.
-        cue_stems: set[str] = {
-            Path(f).stem for f in filtered_single if f.lower().endswith(".cue")
-        }
+        cue_stems = self._cue_stems(filtered_single)
 
         m3u_paired_dirs: set[str] = set()
         paired_count = 0
@@ -826,11 +831,7 @@ class FSRomsHandler(FSHandler):
         filtered_multi = self.exclude_multi_roms(fs_multi_roms)
         multi_dir_set = set(filtered_multi)
 
-        # .bin/.img files whose stem matches a .cue in the same dir are file
-        # parts of that .cue ROM, not standalone ROMs.
-        cue_stems: set[str] = {
-            Path(f).stem for f in filtered_single if f.lower().endswith(".cue")
-        }
+        cue_stems = self._cue_stems(filtered_single)
 
         # M3U files that have a matching sibling directory are treated as one
         # logical ROM: the .m3u is the entry point; the directory holds the
