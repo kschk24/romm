@@ -721,12 +721,21 @@ class FSRomsHandler(FSHandler):
         if not cue_files:
             return 0
 
-        # Group .cue files by base name (strip disc tag if present)
+        # Group .cue files by base name (strip disc tag if present).
+        # Two-pass: disc-tagged files first so that an untagged "game.cue"
+        # never collides with a tagged "game (Disc 1).cue" that shares the
+        # same base — the untagged file is skipped if its stem is already
+        # claimed by a disc-tagged group.
         disc_groups: dict[str, list[str]] = {}
         for cue in cue_files:
             stem = Path(cue).stem
-            base = _DISC_TAG_RE.sub("", stem).strip() or stem
-            disc_groups.setdefault(base, []).append(cue)
+            base = _DISC_TAG_RE.sub("", stem).strip()
+            if base and base != stem:
+                disc_groups.setdefault(base, []).append(cue)
+        for cue in cue_files:
+            stem = Path(cue).stem
+            if stem not in disc_groups:
+                disc_groups.setdefault(stem, []).append(cue)
 
         def _organize(
             _abs: Path,
