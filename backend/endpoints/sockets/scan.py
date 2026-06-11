@@ -572,7 +572,7 @@ async def _identify_platform(
 
     organized = await fs_rom_handler.auto_organize_loose_discs(platform)
     if organized:
-        log.info(f"Auto-organized {hl(str(organized))} multi-disc game(s) into M3U structure")
+        log.info(f"Auto-organized {hl(str(organized))} game(s) into M3U structure")
 
     try:
         fs_roms = await fs_rom_handler.get_roms(platform)

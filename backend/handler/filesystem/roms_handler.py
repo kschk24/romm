@@ -728,37 +728,36 @@ class FSRomsHandler(FSHandler):
             base = _DISC_TAG_RE.sub("", stem).strip() or stem
             disc_groups.setdefault(base, []).append(cue)
 
+        def _organize(
+            _abs: Path,
+            _dir: Path,
+            _m3u: Path,
+            _base: str,
+            _cues: list[str],
+            _all: list[str],
+        ) -> None:
+            _dir.mkdir(parents=True, exist_ok=True)
+            m3u_lines: list[str] = []
+            for cue_name in sorted(_cues):
+                cue_stem = Path(cue_name).stem
+                # Move .cue and every same-stem sibling (e.g. .bin, .img)
+                for sib in _all:
+                    if Path(sib).stem == cue_stem:
+                        src = _abs / sib
+                        dst = _dir / sib
+                        if src.exists() and not dst.exists():
+                            src.rename(dst)
+                m3u_lines.append(f"{_base}/{cue_name}")
+            (_dir / "noload.txt").write_text("\n")
+            _m3u.write_text("\n".join(m3u_lines) + "\n")
+
         organized = 0
         for base_name, cue_list in disc_groups.items():
-
             m3u_path = abs_roms_path / f"{base_name}.m3u"
             dir_path = abs_roms_path / base_name
 
             if m3u_path.exists() or dir_path.exists():
                 continue  # already organized
-
-            def _organize(
-                _abs: Path,
-                _dir: Path,
-                _m3u: Path,
-                _base: str,
-                _cues: list[str],
-                _all: list[str],
-            ) -> None:
-                _dir.mkdir(parents=True, exist_ok=True)
-                m3u_lines: list[str] = []
-                for cue_name in sorted(_cues):
-                    cue_stem = Path(cue_name).stem
-                    # Move .cue and every same-stem sibling (e.g. .bin, .img)
-                    for sib in _all:
-                        if Path(sib).stem == cue_stem:
-                            src = _abs / sib
-                            dst = _dir / sib
-                            if src.exists() and not dst.exists():
-                                src.rename(dst)
-                    m3u_lines.append(f"{_base}/{cue_name}")
-                (_dir / "noload.txt").write_text("\n")
-                _m3u.write_text("\n".join(m3u_lines) + "\n")
 
             try:
                 await asyncio.to_thread(
