@@ -1504,6 +1504,11 @@ async def update_rom(
     # Rename the file/folder if the name has changed
     should_update_fs = new_fs_name != rom.fs_name
     is_m3u_rom = bool(rom.fs_extension and rom.fs_extension.lower() == "m3u")
+    new_stem = (
+        fs_rom_handler.get_file_name_with_no_extension(new_fs_name)
+        if is_m3u_rom
+        else new_fs_name
+    )
     if should_update_fs:
         try:
             await fs_rom_handler.rename_fs_rom(
@@ -1519,7 +1524,6 @@ async def update_rom(
 
         # For M3U-backed ROMs also rename the sibling content directory
         if is_m3u_rom:
-            new_stem = fs_rom_handler.get_file_name_with_no_extension(new_fs_name)
             try:
                 await fs_rom_handler.rename_fs_rom(
                     old_name=rom.fs_name_no_ext,
@@ -1533,11 +1537,7 @@ async def update_rom(
     if should_update_fs:
         # M3U-backed ROMs: file_path/file_name reference the stem, not the .m3u filename
         old_pattern = rom.fs_name_no_ext if is_m3u_rom else rom.fs_name
-        new_pattern = (
-            fs_rom_handler.get_file_name_with_no_extension(new_fs_name)
-            if is_m3u_rom
-            else new_fs_name
-        )
+        new_pattern = new_stem
         for file in rom.files:
             db_rom_handler.update_rom_file(
                 file.id,
