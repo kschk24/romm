@@ -1456,6 +1456,7 @@ async def update_rom(
 
     # Rename the file/folder if the name has changed
     should_update_fs = new_fs_name != rom.fs_name
+    is_m3u_rom = bool(rom.fs_extension and rom.fs_extension.lower() == "m3u")
     if should_update_fs:
         try:
             await fs_rom_handler.rename_fs_rom(
@@ -1469,14 +1470,33 @@ async def update_rom(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=exc
             ) from exc
 
+        # For M3U-backed ROMs also rename the sibling content directory
+        if is_m3u_rom:
+            new_stem = fs_rom_handler.get_file_name_with_no_extension(new_fs_name)
+            try:
+                await fs_rom_handler.rename_fs_rom(
+                    old_name=rom.fs_name_no_ext,
+                    new_name=new_stem,
+                    fs_path=rom.fs_path,
+                )
+            except (RomAlreadyExistsException, FileNotFoundError) as exc:
+                log.warning(f"Couldn't rename sibling dir for {hl(rom.fs_name)}: {exc}")
+
     # Update the rom files with the new fs_name
     if should_update_fs:
+        # M3U-backed ROMs: file_path/file_name reference the stem, not the .m3u filename
+        old_pattern = rom.fs_name_no_ext if is_m3u_rom else rom.fs_name
+        new_pattern = (
+            fs_rom_handler.get_file_name_with_no_extension(new_fs_name)
+            if is_m3u_rom
+            else new_fs_name
+        )
         for file in rom.files:
             db_rom_handler.update_rom_file(
                 file.id,
                 {
-                    "file_name": file.file_name.replace(rom.fs_name, new_fs_name),
-                    "file_path": file.file_path.replace(rom.fs_name, new_fs_name),
+                    "file_name": file.file_name.replace(old_pattern, new_pattern),
+                    "file_path": file.file_path.replace(old_pattern, new_pattern),
                 },
             )
 
@@ -1539,6 +1559,13 @@ async def delete_roms(
                         await fs_rom_handler.remove_directory(rom_path)
                     else:
                         await fs_rom_handler.remove_file(rom_path)
+                        # For M3U-backed ROMs also remove the sibling content directory
+                        if rom.fs_extension and rom.fs_extension.lower() == "m3u":
+                            sibling_dir = f"{rom.fs_path}/{rom.fs_name_no_ext}"
+                            try:
+                                await fs_rom_handler.remove_directory(sibling_dir)
+                            except FileNotFoundError:
+                                pass
                         # Clean up empty parent directory if it becomes empty
                         parent = full_path.parent
                         if (

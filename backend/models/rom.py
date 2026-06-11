@@ -126,8 +126,12 @@ class RomFile(BaseModel):
 
     @cached_property
     def is_top_level(self) -> bool:
-        # File is the same as the rom's full path, or nested file in the rom's directory
-        return self.rom.full_path == (
+        # File is the same as the rom's full path, or nested file in the rom's directory.
+        # M3U-backed ROMs: content dir is named after the stem, not the .m3u path.
+        rom_content_path = self.rom.full_path
+        if rom_content_path.lower().endswith(".m3u"):
+            rom_content_path = f"{self.rom.fs_path}/{self.rom.fs_name_no_ext}"
+        return rom_content_path == (
             self.file_path if self.is_nested else self.full_path
         )
 
