@@ -331,8 +331,15 @@ class FSRomsHandler(FSHandler):
         rom_dir = Path(abs_fs_path, rom.fs_name)
         rom_ext = f".{rom.fs_extension.lower()}" if rom.fs_extension else ""
 
+        # For M3U-backed ROMs the actual disc images live in a sibling directory
+        # named after the .m3u stem (e.g. "Game (USA).m3u" → "Game (USA)/").
+        if rom_ext == ".m3u":
+            m3u_sibling = Path(abs_fs_path, Path(rom.fs_name).stem)
+            if await AnyioPath(m3u_sibling).is_dir():
+                rom_dir = m3u_sibling
+
         # Check if rom is a multi-part rom
-        if await AnyioPath(f"{abs_fs_path}/{rom.fs_name}").is_dir():
+        if await AnyioPath(rom_dir).is_dir():
             # Calculate the RA hash if the platform has a slug that matches a known RA slug
             if calculate_hashes:
                 ra_platform = meta_ra_handler.get_platform(rom.platform_slug)
@@ -352,18 +359,16 @@ class FSRomsHandler(FSHandler):
                     ra_path = (
                         str(chd_file)
                         if chd_file and chd_file.is_file()
-                        else f"{abs_fs_path}/{rom.fs_name}/*"
+                        else f"{rom_dir}/*"
                     )
                     rom_ra_h = await RAHasherService().calculate_hash(
                         ra_platform,
                         ra_path,
                     )
 
-            for f_path, file_name in iter_files(
-                f"{abs_fs_path}/{rom.fs_name}", recursive=True
-            ):
+            for f_path, file_name in iter_files(str(rom_dir), recursive=True):
                 # Check if file is excluded by extension.
-                f_rom_dir = Path(f_path, rom.fs_name)
+                f_rom_dir = Path(f_path, file_name)
                 file_name_lower = file_name.lower()
                 if any(
                     file_name_lower.endswith("." + ext) for ext in excluded_file_exts
@@ -378,7 +383,7 @@ class FSRomsHandler(FSHandler):
                     continue
 
                 # Check if this is a top-level file (not in a subdirectory)
-                is_top_level = f_path.samefile(Path(abs_fs_path, rom.fs_name))
+                is_top_level = f_path.samefile(rom_dir)
 
                 if hashable_platform:
                     try:
@@ -667,9 +672,23 @@ class FSRomsHandler(FSHandler):
         except FileNotFoundError as e:
             raise RomsNotFoundException(platform=platform.fs_slug) from e
 
-        return len(self.exclude_single_files(fs_single_roms)) + len(
-            self.exclude_multi_roms(fs_multi_roms)
-        )
+        filtered_single = self.exclude_single_files(fs_single_roms)
+        filtered_multi = self.exclude_multi_roms(fs_multi_roms)
+        multi_dir_set = set(filtered_multi)
+
+        m3u_paired_dirs: set[str] = set()
+        paired_count = 0
+        unpaired_single_count = 0
+        for file_name in filtered_single:
+            stem = Path(file_name).stem
+            if file_name.lower().endswith(".m3u") and stem in multi_dir_set:
+                m3u_paired_dirs.add(stem)
+                paired_count += 1
+            else:
+                unpaired_single_count += 1
+
+        multi_count = sum(1 for d in filtered_multi if d not in m3u_paired_dirs)
+        return unpaired_single_count + multi_count + paired_count
 
     async def get_roms(self, platform: Platform) -> list[FSRom]:
         """Gets all filesystem roms for a platform
@@ -689,13 +708,36 @@ class FSRomsHandler(FSHandler):
         except FileNotFoundError as e:
             raise RomsNotFoundException(platform=platform.fs_slug) from e
 
-        fs_roms: list[dict] = [
-            {"fs_name": rom, "flat": True, "nested": False}
-            for rom in self.exclude_single_files(fs_single_roms)
-        ] + [
-            {"fs_name": rom, "flat": False, "nested": True}
-            for rom in self.exclude_multi_roms(fs_multi_roms)
-        ]
+        filtered_single = self.exclude_single_files(fs_single_roms)
+        filtered_multi = self.exclude_multi_roms(fs_multi_roms)
+        multi_dir_set = set(filtered_multi)
+
+        # M3U files that have a matching sibling directory are treated as one
+        # logical ROM: the .m3u is the entry point; the directory holds the
+        # actual disc images.  Emit a single nested FSRom and suppress the
+        # directory entry that would otherwise create a duplicate ROM.
+        m3u_paired_dirs: set[str] = set()
+        paired_entries: list[dict] = []
+        unpaired_single: list[str] = []
+        for file_name in filtered_single:
+            stem = Path(file_name).stem
+            if file_name.lower().endswith(".m3u") and stem in multi_dir_set:
+                m3u_paired_dirs.add(stem)
+                paired_entries.append(
+                    {"fs_name": file_name, "flat": False, "nested": True}
+                )
+            else:
+                unpaired_single.append(file_name)
+
+        fs_roms: list[dict] = (
+            [{"fs_name": rom, "flat": True, "nested": False} for rom in unpaired_single]
+            + [
+                {"fs_name": rom, "flat": False, "nested": True}
+                for rom in filtered_multi
+                if rom not in m3u_paired_dirs
+            ]
+            + paired_entries
+        )
 
         return sorted(
             [

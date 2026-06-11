@@ -49,6 +49,7 @@ DEFAULT_EXCLUDED_FILES: Final = [
     "@SynoResource",
     "gamelist.xml",
     "metadata.pegasus.txt",
+    "noload.txt",
 ]
 DEFAULT_EXCLUDED_DIRS: Final = [
     "@eaDir",
