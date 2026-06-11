@@ -133,8 +133,13 @@ class RomFile(BaseModel):
 
     def file_name_for_download(self, hidden_folder: bool = False) -> str:
         # This needs a trailing slash in the path to work!
+        # M3U-backed ROMs: content files live in a sibling directory named
+        # after the .m3u stem, not under the .m3u path itself.
+        rom_prefix = self.rom.full_path
+        if rom_prefix.lower().endswith(".m3u"):
+            rom_prefix = f"{self.rom.fs_path}/{self.rom.fs_name_no_ext}"
         return self.full_path.replace(
-            f"{self.rom.full_path}/", ".hidden/" if hidden_folder else ""
+            f"{rom_prefix}/", ".hidden/" if hidden_folder else ""
         )
 
     def __repr__(self) -> str:

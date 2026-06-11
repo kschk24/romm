@@ -1028,7 +1028,7 @@ async def get_rom_content(
                     m3u_encoded_content = "\n".join(
                         [f.file_name_for_download(hidden_folder) for f in m3u_files]
                     ).encode()
-                    m3u_filename = f"{rom.fs_name}.m3u"
+                    m3u_filename = f"{rom.fs_name_no_ext}.m3u"
                     m3u_info = ZipInfo(
                         filename=m3u_filename, date_time=now.timetuple()[:6]
                     )
@@ -1076,7 +1076,7 @@ async def get_rom_content(
             crc32=crc32_to_hex(binascii.crc32(m3u_encoded_content)),
             size_bytes=len(m3u_encoded_content),
             encoded_location=f"/decode?value={m3u_base64_content}",
-            filename=f"{file_name}.m3u",
+            filename=f"{rom.fs_name_no_ext}.m3u",
         )
         content_lines.append(m3u_line)
 
