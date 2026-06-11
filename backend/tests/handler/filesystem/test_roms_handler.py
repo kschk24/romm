@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 from tests._zipfile_shim import reload_zipfile
 
-from config.config_manager import LIBRARY_BASE_PATH, Config
+from config.config_manager import DEFAULT_EXCLUDED_EXTENSIONS, LIBRARY_BASE_PATH, Config
 from handler.filesystem.roms_handler import (
     FileHash,
     FSRomsHandler,
@@ -1145,6 +1145,548 @@ class TestFSRomsHandler:
 
         mock_calculate.assert_called_once()
         assert parsed.ra_hash == ""
+
+    # ── helpers shared by cue / disc-organize tests ───────────────────────────
+
+    @pytest.fixture
+    def psx_platform(self):
+        return Platform(name="PlayStation", slug="psx", fs_slug="psx")
+
+    @staticmethod
+    def _psx_config():
+        cnfg = Config(
+            EXCLUDED_PLATFORMS=[],
+            EXCLUDED_SINGLE_EXT=[],
+            EXCLUDED_SINGLE_FILES=[],
+            EXCLUDED_MULTI_FILES=[],
+            EXCLUDED_MULTI_PARTS_EXT=[],
+            EXCLUDED_MULTI_PARTS_FILES=[],
+            PLATFORMS_BINDING={},
+            PLATFORMS_VERSIONS={},
+            ROMS_FOLDER_NAME="roms",
+            FIRMWARE_FOLDER_NAME="bios",
+        )
+        cnfg.has_structure_path_b = True
+        return cnfg
+
+    @staticmethod
+    def _psx_handler(tmp_path: Path) -> FSRomsHandler:
+        h = FSRomsHandler()
+        h.base_path = tmp_path
+        return h
+
+    # ── _cue_stems ────────────────────────────────────────────────────────────
+
+    def test_cue_stems_returns_cue_stems(self, handler: FSRomsHandler):
+        files = ["Game (Disc 1).cue", "Game (Disc 1).bin", "Other.iso"]
+        assert handler._cue_stems(files) == {"Game (Disc 1)"}
+
+    def test_cue_stems_case_insensitive(self, handler: FSRomsHandler):
+        # .CUE uppercase should still be treated as a cue file
+        files = ["GAME.CUE", "other.bin"]
+        assert handler._cue_stems(files) == {"GAME"}
+
+    def test_cue_stems_empty(self, handler: FSRomsHandler):
+        assert handler._cue_stems([]) == set()
+
+    def test_cue_stems_no_cue_files(self, handler: FSRomsHandler):
+        assert handler._cue_stems(["game.iso", "game.bin"]) == set()
+
+    def test_cue_stems_multiple_cues(self, handler: FSRomsHandler):
+        files = ["Disc1.cue", "Disc2.cue", "Disc1.bin", "Disc2.bin"]
+        assert handler._cue_stems(files) == {"Disc1", "Disc2"}
+
+    # ── assembling extension exclusion ───────────────────────────────────────
+
+    def test_assembling_in_default_excluded_extensions(self):
+        assert "assembling" in DEFAULT_EXCLUDED_EXTENSIONS
+
+    def test_exclude_single_files_assembling_extension(self, handler: FSRomsHandler):
+        cnfg = Config(
+            EXCLUDED_PLATFORMS=[],
+            EXCLUDED_SINGLE_EXT=["assembling"],
+            EXCLUDED_SINGLE_FILES=[],
+            EXCLUDED_MULTI_FILES=[],
+            EXCLUDED_MULTI_PARTS_EXT=[],
+            EXCLUDED_MULTI_PARTS_FILES=[],
+            PLATFORMS_BINDING={},
+            PLATFORMS_VERSIONS={},
+            ROMS_FOLDER_NAME="roms",
+            FIRMWARE_FOLDER_NAME="bios",
+        )
+        files = ["game.iso", "game.iso.assembling", "other.cue"]
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.base_handler.cm.get_config", lambda: cnfg)
+            result = handler.exclude_single_files(files)
+        assert "game.iso.assembling" not in result
+        assert "game.iso" in result
+        assert "other.cue" in result
+
+    # ── auto_organize_loose_discs ─────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_auto_organize_platform_path_not_found(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_auto_organize_no_cue_files(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "game.iso").write_text("")
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_auto_organize_single_disc(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "Silent Hill.cue").write_text("TRACK 01")
+        (roms / "Silent Hill.bin").write_bytes(b"\x00" * 16)
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        assert result >= 1
+        game_dir = roms / "Silent Hill"
+        m3u = roms / "Silent Hill.m3u"
+        assert game_dir.is_dir()
+        assert m3u.exists()
+        assert (game_dir / "Silent Hill.cue").exists()
+        assert (game_dir / "Silent Hill.bin").exists()
+        assert (game_dir / "noload.txt").exists()
+        assert "Silent Hill/Silent Hill.cue" in m3u.read_text()
+
+    @pytest.mark.asyncio
+    async def test_auto_organize_multi_disc(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "Final Fantasy VII (Disc 1).cue").write_text("TRACK 01")
+        (roms / "Final Fantasy VII (Disc 1).bin").write_bytes(b"\x00" * 16)
+        (roms / "Final Fantasy VII (Disc 2).cue").write_text("TRACK 01")
+        (roms / "Final Fantasy VII (Disc 2).bin").write_bytes(b"\x00" * 16)
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        assert result >= 1
+        game_dir = roms / "Final Fantasy VII"
+        m3u = roms / "Final Fantasy VII.m3u"
+        assert game_dir.is_dir()
+        assert m3u.exists()
+        content = m3u.read_text()
+        assert "Final Fantasy VII/Final Fantasy VII (Disc 1).cue" in content
+        assert "Final Fantasy VII/Final Fantasy VII (Disc 2).cue" in content
+        assert (game_dir / "Final Fantasy VII (Disc 1).cue").exists()
+        assert (game_dir / "Final Fantasy VII (Disc 2).cue").exists()
+        assert (game_dir / "Final Fantasy VII (Disc 1).bin").exists()
+        assert (game_dir / "Final Fantasy VII (Disc 2).bin").exists()
+        assert (game_dir / "noload.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_auto_organize_idempotent_m3u_exists(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "Parasite Eve.cue").write_text("TRACK 01")
+        (roms / "Parasite Eve.m3u").write_text("Parasite Eve/Parasite Eve.cue\n")
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        assert result == 0
+        # .cue not moved because M3U already existed
+        assert (roms / "Parasite Eve.cue").exists()
+
+    @pytest.mark.asyncio
+    async def test_auto_organize_idempotent_dir_exists(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "Parasite Eve.cue").write_text("TRACK 01")
+        (roms / "Parasite Eve").mkdir()
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        assert result == 0
+        # .cue not moved because the sibling directory already existed
+        assert (roms / "Parasite Eve.cue").exists()
+
+    @pytest.mark.asyncio
+    async def test_auto_organize_collision_prevention(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        # "game.cue" (untagged) must NOT be merged with "game (Disc 1).cue"
+        # (disc-tagged). The disc-tagged file goes into "game/"; the untagged
+        # file's stem collides with the group key so it is left in place.
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "game.cue").write_text("TRACK 01")
+        (roms / "game (Disc 1).cue").write_text("TRACK 01")
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            await h.auto_organize_loose_discs(psx_platform)
+        game_dir = roms / "game"
+        assert game_dir.is_dir()
+        # Disc-tagged file moved into the group directory
+        assert (game_dir / "game (Disc 1).cue").exists()
+        # Untagged file must NOT appear in the disc-tagged group directory
+        assert not (game_dir / "game.cue").exists()
+
+    # ── count_roms / get_roms .bin/.img suppression ───────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_count_roms_bin_suppressed_by_cue(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "game.cue").write_text("")
+        (roms / "game.bin").write_text("")
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            count = await h.count_roms(psx_platform)
+        # game.bin is suppressed; only game.cue counted
+        assert count == 1
+
+    @pytest.mark.asyncio
+    async def test_count_roms_bin_without_cue_not_suppressed(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "game.cue").write_text("")
+        (roms / "other.bin").write_text("")  # different stem — not suppressed
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            count = await h.count_roms(psx_platform)
+        assert count == 2
+
+    @pytest.mark.asyncio
+    async def test_get_roms_bin_suppressed_by_cue(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "game.cue").write_text("")
+        (roms / "game.bin").write_text("")
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.get_roms(psx_platform)
+        names = [r["fs_name"] for r in result]
+        assert "game.cue" in names
+        assert "game.bin" not in names
+
+    @pytest.mark.asyncio
+    async def test_get_roms_img_suppressed_by_cue(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "track.cue").write_text("")
+        (roms / "track.img").write_text("")
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.get_roms(psx_platform)
+        names = [r["fs_name"] for r in result]
+        assert "track.cue" in names
+        assert "track.img" not in names
+
+    @pytest.mark.asyncio
+    async def test_get_roms_bin_without_cue_not_suppressed(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "game.cue").write_text("")
+        (roms / "other.bin").write_text("")
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.get_roms(psx_platform)
+        names = [r["fs_name"] for r in result]
+        assert "other.bin" in names
+
+    # ── get_rom_files .cue sibling gathering ──────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_get_rom_files_cue_includes_bin_sibling(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "game.cue").write_text("TRACK 01")
+        (roms / "game.bin").write_bytes(b"\x00" * 32)
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        rom = Rom(
+            id=1,
+            fs_name="game.cue",
+            fs_extension="cue",
+            fs_path="psx/roms",
+            platform=psx_platform,
+        )
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            parsed = await h.get_rom_files(rom, calculate_hashes=False)
+        file_names = [f.file_name for f in parsed.rom_files]
+        assert "game.cue" in file_names
+        assert "game.bin" in file_names
+
+    @pytest.mark.asyncio
+    async def test_get_rom_files_cue_includes_img_sibling(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "track.cue").write_text("TRACK 01")
+        (roms / "track.img").write_bytes(b"\x00" * 32)
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        rom = Rom(
+            id=1,
+            fs_name="track.cue",
+            fs_extension="cue",
+            fs_path="psx/roms",
+            platform=psx_platform,
+        )
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            parsed = await h.get_rom_files(rom, calculate_hashes=False)
+        file_names = [f.file_name for f in parsed.rom_files]
+        assert "track.cue" in file_names
+        assert "track.img" in file_names
+
+    @pytest.mark.asyncio
+    async def test_get_rom_files_cue_does_not_include_unrelated_bin(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "game.cue").write_text("TRACK 01")
+        (roms / "other.bin").write_bytes(b"\x00" * 32)
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        rom = Rom(
+            id=1,
+            fs_name="game.cue",
+            fs_extension="cue",
+            fs_path="psx/roms",
+            platform=psx_platform,
+        )
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            parsed = await h.get_rom_files(rom, calculate_hashes=False)
+        file_names = [f.file_name for f in parsed.rom_files]
+        assert "game.cue" in file_names
+        assert "other.bin" not in file_names
+
+    # ── RomFile.is_top_level ──────────────────────────────────────────────────
+
+    def test_rom_file_is_top_level_flat_file(self):
+        platform = Platform(name="PlayStation", slug="psx", fs_slug="psx")
+        rom = Rom(
+            id=1,
+            fs_name="game.iso",
+            fs_extension="iso",
+            fs_path="psx/roms",
+            platform=platform,
+        )
+        file = RomFile(
+            id=1,
+            rom_id=1,
+            file_name="game.iso",
+            file_path="psx/roms",
+            rom=rom,
+        )
+        assert file.is_top_level is True
+
+    def test_rom_file_is_top_level_file_in_rom_dir(self):
+        platform = Platform(name="PlayStation", slug="psx", fs_slug="psx")
+        rom = Rom(
+            id=1,
+            fs_name="game",
+            fs_extension="",
+            fs_path="psx/roms",
+            platform=platform,
+        )
+        file = RomFile(
+            id=1,
+            rom_id=1,
+            file_name="disc1.cue",
+            file_path="psx/roms/game",
+            rom=rom,
+        )
+        assert file.is_top_level is True
+
+    def test_rom_file_is_top_level_deep_nested(self):
+        platform = Platform(name="PlayStation", slug="psx", fs_slug="psx")
+        rom = Rom(
+            id=1,
+            fs_name="game",
+            fs_extension="",
+            fs_path="psx/roms",
+            platform=platform,
+        )
+        file = RomFile(
+            id=1,
+            rom_id=1,
+            file_name="data.bin",
+            file_path="psx/roms/game/sub",
+            rom=rom,
+        )
+        assert file.is_top_level is False
+
+    def test_rom_file_is_top_level_m3u_content_dir(self):
+        platform = Platform(name="PlayStation", slug="psx", fs_slug="psx")
+        rom = Rom(
+            id=1,
+            fs_name="Game (USA).m3u",
+            fs_name_no_ext="Game (USA)",
+            fs_extension="m3u",
+            fs_path="psx/roms",
+            platform=platform,
+        )
+        file = RomFile(
+            id=1,
+            rom_id=1,
+            file_name="Disc1.cue",
+            file_path="psx/roms/Game (USA)",
+            rom=rom,
+        )
+        # File is in the M3U sibling dir → top-level
+        assert file.is_top_level is True
+
+    def test_rom_file_is_top_level_m3u_subdirectory(self):
+        platform = Platform(name="PlayStation", slug="psx", fs_slug="psx")
+        rom = Rom(
+            id=1,
+            fs_name="Game (USA).m3u",
+            fs_name_no_ext="Game (USA)",
+            fs_extension="m3u",
+            fs_path="psx/roms",
+            platform=platform,
+        )
+        file = RomFile(
+            id=1,
+            rom_id=1,
+            file_name="track.bin",
+            file_path="psx/roms/Game (USA)/sub",
+            rom=rom,
+        )
+        # File is deeper than the M3U sibling dir → not top-level
+        assert file.is_top_level is False
+
+    # ── RomFile.file_name_for_download ────────────────────────────────────────
+
+    def test_file_name_for_download_dir_rom(self):
+        platform = Platform(name="PlayStation", slug="psx", fs_slug="psx")
+        rom = Rom(
+            id=1,
+            fs_name="game",
+            fs_extension="",
+            fs_path="psx/roms",
+            platform=platform,
+        )
+        file = RomFile(
+            id=1,
+            rom_id=1,
+            file_name="game.cue",
+            file_path="psx/roms/game",
+            rom=rom,
+        )
+        assert file.file_name_for_download() == "game.cue"
+
+    def test_file_name_for_download_dir_rom_hidden(self):
+        platform = Platform(name="PlayStation", slug="psx", fs_slug="psx")
+        rom = Rom(
+            id=1,
+            fs_name="game",
+            fs_extension="",
+            fs_path="psx/roms",
+            platform=platform,
+        )
+        file = RomFile(
+            id=1,
+            rom_id=1,
+            file_name="game.cue",
+            file_path="psx/roms/game",
+            rom=rom,
+        )
+        assert file.file_name_for_download(hidden_folder=True) == ".hidden/game.cue"
+
+    def test_file_name_for_download_m3u_rom(self):
+        platform = Platform(name="PlayStation", slug="psx", fs_slug="psx")
+        rom = Rom(
+            id=1,
+            fs_name="Game (USA).m3u",
+            fs_name_no_ext="Game (USA)",
+            fs_extension="m3u",
+            fs_path="psx/roms",
+            platform=platform,
+        )
+        file = RomFile(
+            id=1,
+            rom_id=1,
+            file_name="Disc1.cue",
+            file_path="psx/roms/Game (USA)",
+            rom=rom,
+        )
+        # Sibling-dir prefix is replaced with stem/ folder name
+        assert file.file_name_for_download() == "Game (USA)/Disc1.cue"
+
+    def test_file_name_for_download_m3u_rom_hidden(self):
+        platform = Platform(name="PlayStation", slug="psx", fs_slug="psx")
+        rom = Rom(
+            id=1,
+            fs_name="Game (USA).m3u",
+            fs_name_no_ext="Game (USA)",
+            fs_extension="m3u",
+            fs_path="psx/roms",
+            platform=platform,
+        )
+        file = RomFile(
+            id=1,
+            rom_id=1,
+            file_name="Disc1.cue",
+            file_path="psx/roms/Game (USA)",
+            rom=rom,
+        )
+        assert file.file_name_for_download(hidden_folder=True) == ".hidden/Disc1.cue"
 
 
 class TestExtractCHDHash:
