@@ -27,6 +27,9 @@ function showNext() {
 }
 
 function closeDialog() {
+  // Ignore duplicate close calls (e.g. manual close + Vuetify @timeout firing
+  // for the same snackbar); otherwise the queue could advance twice and drop one.
+  if (!show.value) return;
   notificationStore.remove(snackbarStatus.value.id);
   show.value = false;
   // Advance to the next queued snackbar after the close transition.
