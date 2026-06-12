@@ -129,6 +129,11 @@ const scanOptions = [
     value: "hashes",
   },
   {
+    title: t("scan.organize-discs"),
+    subtitle: t("scan.organize-discs-desc"),
+    value: "organize",
+  },
+  {
     title: t("scan.complete-rescan"),
     subtitle: t("scan.complete-rescan-desc"),
     value: "complete",
