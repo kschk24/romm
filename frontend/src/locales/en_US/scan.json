@@ -27,6 +27,8 @@
   "new-platforms-desc": "Scan new platforms only (fastest)",
   "no-new-roms": "No new/changed ROMs found",
   "not-identified": "Not identified",
+  "organize-none": "Organize complete — no discs needed organizing",
+  "organized-summary": "Organized {n} game(s) into M3U structure",
   "organize-discs": "Organize discs",
   "organize-discs-desc": "Restructure loose multi-disc games into .m3u format for selected platforms (no metadata matching)",
   "platforms-scanned-n": "Platforms: {n} scanned",

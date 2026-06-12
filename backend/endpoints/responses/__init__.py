@@ -16,6 +16,7 @@ class ScanStats(TypedDict):
     identified_roms: int
     scanned_firmware: int
     new_firmware: int
+    organized_roms: int
 
 
 class ScanTaskMeta(TypedDict):

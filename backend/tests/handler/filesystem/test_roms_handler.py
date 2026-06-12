@@ -1233,7 +1233,7 @@ class TestFSRomsHandler:
         with pytest.MonkeyPatch.context() as m:
             m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
             result = await h.auto_organize_loose_discs(psx_platform)
-        assert result == 0
+        assert result == []
 
     @pytest.mark.asyncio
     async def test_auto_organize_no_cue_files(
@@ -1247,7 +1247,7 @@ class TestFSRomsHandler:
         with pytest.MonkeyPatch.context() as m:
             m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
             result = await h.auto_organize_loose_discs(psx_platform)
-        assert result == 0
+        assert result == []
 
     @pytest.mark.asyncio
     async def test_auto_organize_single_disc(
@@ -1262,7 +1262,7 @@ class TestFSRomsHandler:
         with pytest.MonkeyPatch.context() as m:
             m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
             result = await h.auto_organize_loose_discs(psx_platform)
-        assert result >= 1
+        assert result == ["Silent Hill"]
         game_dir = roms / "Silent Hill"
         m3u = roms / "Silent Hill.m3u"
         assert game_dir.is_dir()
@@ -1287,7 +1287,7 @@ class TestFSRomsHandler:
         with pytest.MonkeyPatch.context() as m:
             m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
             result = await h.auto_organize_loose_discs(psx_platform)
-        assert result >= 1
+        assert result == ["Final Fantasy VII"]
         game_dir = roms / "Final Fantasy VII"
         m3u = roms / "Final Fantasy VII.m3u"
         assert game_dir.is_dir()
@@ -1319,7 +1319,7 @@ class TestFSRomsHandler:
             m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
             result = await h.auto_organize_loose_discs(psx_platform)
         # Exactly one game organized (not three)
-        assert result == 1
+        assert result == ["Metal Gear Solid (USA) (Rev 1)"]
         game_dir = roms / "Metal Gear Solid (USA) (Rev 1)"
         m3u = roms / "Metal Gear Solid (USA) (Rev 1).m3u"
         assert game_dir.is_dir()
@@ -1346,7 +1346,7 @@ class TestFSRomsHandler:
         with pytest.MonkeyPatch.context() as m:
             m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
             result = await h.auto_organize_loose_discs(psx_platform)
-        assert result == 0
+        assert result == []
         # .cue not moved because M3U already existed
         assert (roms / "Parasite Eve.cue").exists()
 
@@ -1363,7 +1363,7 @@ class TestFSRomsHandler:
         with pytest.MonkeyPatch.context() as m:
             m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
             result = await h.auto_organize_loose_discs(psx_platform)
-        assert result == 0
+        assert result == []
         # .cue not moved because the sibling directory already existed
         assert (roms / "Parasite Eve.cue").exists()
 
@@ -1405,7 +1405,7 @@ class TestFSRomsHandler:
         with pytest.MonkeyPatch.context() as m:
             m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
             result = await h.auto_organize_loose_discs(psx_platform)
-        assert result == 1
+        assert result == ["Metal Gear Solid (USA)"]
         m3u = roms / "Metal Gear Solid (USA).m3u"
         assert m3u.exists()
         content = m3u.read_text()
@@ -1427,7 +1427,7 @@ class TestFSRomsHandler:
         with pytest.MonkeyPatch.context() as m:
             m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
             result = await h.auto_organize_loose_discs(psx_platform)
-        assert result == 0
+        assert result == []
 
     @pytest.mark.asyncio
     async def test_auto_organize_subdir_no_cue_files_skipped(
@@ -1442,7 +1442,7 @@ class TestFSRomsHandler:
         with pytest.MonkeyPatch.context() as m:
             m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
             result = await h.auto_organize_loose_discs(psx_platform)
-        assert result == 0
+        assert result == []
         assert not (roms / "saves.m3u").exists()
 
     # ── count_roms / get_roms .bin/.img suppression ───────────────────────────

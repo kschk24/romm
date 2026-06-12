@@ -699,7 +699,7 @@ class FSRomsHandler(FSHandler):
                 rom_sha1_h,
             )
 
-    async def auto_organize_loose_discs(self, platform: Platform) -> int:
+    async def auto_organize_loose_discs(self, platform: Platform) -> list[str]:
         """Detect loose multi-disc .cue files and restructure them into the
         M3U + sibling-directory layout the scanner expects.
 
@@ -708,14 +708,14 @@ class FSRomsHandler(FSHandler):
           <roms>/<Game Name>.m3u        — lists the disc .cue paths
           <roms>/<Game Name>/           — contains all disc files + noload.txt
 
-        Returns the number of games reorganized.
+        Returns the fs_names (directory names) of the games reorganized this run.
         """
         rel_roms_path = self.get_roms_fs_structure(platform.fs_slug)
         try:
             abs_roms_path = self.validate_path(rel_roms_path)
             all_files = await self.list_files(path=rel_roms_path)
         except FileNotFoundError:
-            return 0
+            return []
 
         cue_files = [f for f in all_files if f.lower().endswith(".cue")]
 
@@ -774,7 +774,7 @@ class FSRomsHandler(FSHandler):
                 noload.write_text("\n")
             return len(cues)
 
-        organized = 0
+        organized: list[str] = []
         for base_name, cue_list in disc_groups.items():
             m3u_path = abs_roms_path / f"{base_name}.m3u"
             dir_path = abs_roms_path / base_name
@@ -793,7 +793,7 @@ class FSRomsHandler(FSHandler):
                 f"Auto-organized {hl(base_name)} ({len(cue_list)} discs) "
                 f"→ {hl(f'{base_name}.m3u')}"
             )
-            organized += 1
+            organized.append(base_name)
 
         # Pass 2: subdirectories that already contain .cue files but have no
         # paired .m3u at the platform root.
@@ -815,7 +815,7 @@ class FSRomsHandler(FSHandler):
                     f"Created missing M3U for {hl(dir_name)} ({cue_count} disc(s)) "
                     f"→ {hl(f'{dir_name}.m3u')}"
                 )
-                organized += 1
+                organized.append(dir_name)
 
         return organized
 

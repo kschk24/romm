@@ -133,6 +133,23 @@ socket.on("scan:done", () => {
     color: "green",
     timeout: 4000,
   });
+
+  const organizedCount = scanningStore.scanStats.organized_roms ?? 0;
+  if (organizedCount > 0) {
+    emitter?.emit("snackbarShow", {
+      msg: t("scan.organized-summary", { n: organizedCount }),
+      icon: "mdi-disc",
+      color: "green",
+      timeout: 4000,
+    });
+  } else if (scanningStore.scanType === "organize") {
+    emitter?.emit("snackbarShow", {
+      msg: t("scan.organize-none"),
+      icon: "mdi-disc",
+      color: "green",
+      timeout: 4000,
+    });
+  }
 });
 
 socket.on("scan:done_ko", (msg) => {
