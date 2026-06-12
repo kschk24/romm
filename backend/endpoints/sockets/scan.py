@@ -227,6 +227,30 @@ def _skip_metadata_phase(scan_type: ScanType) -> bool:
     return scan_type in {ScanType.HASHES, ScanType.ORGANIZE}
 
 
+async def _emit_scanning_rom(
+    socket_manager: socketio.AsyncRedisManager,
+    rom: Rom,
+) -> None:
+    """Emit a ``scan:scanning_rom`` event so the rom shows up in the scan UI.
+
+    The scan results panel is populated entirely from these events, so any rom
+    that was added or updated during a scan must be emitted at least once.
+    """
+    await socket_manager.emit(
+        "scan:scanning_rom",
+        SimpleRomSchema.from_orm_with_factory(rom).model_dump(
+            exclude={
+                "created_at",
+                "updated_at",
+                "rom_user",
+                "last_modified",
+                "files",
+                "siblings",
+            }
+        ),
+    )
+
+
 def _should_get_rom_files(
     scan_type: ScanType,
     rom: Rom,
@@ -404,22 +428,15 @@ async def _identify_rom(
     _added_rom = db_rom_handler.add_rom(scanned_rom)
 
     if _added_rom.is_identified:
-        await socket_manager.emit(
-            "scan:scanning_rom",
-            SimpleRomSchema.from_orm_with_factory(_added_rom).model_dump(
-                exclude={
-                    "created_at",
-                    "updated_at",
-                    "rom_user",
-                    "last_modified",
-                    "files",
-                    "siblings",
-                }
-            ),
-        )
+        await _emit_scanning_rom(socket_manager, _added_rom)
 
     # Short circuit for scans that don't fetch metadata (hashes, organize)
     if _skip_metadata_phase(scan_type):
+        # Surface roms that skip the metadata phase (e.g. organize-added .m3u
+        # entries, which are unidentified) so they still appear in the scan
+        # results UI instead of leaving it showing "No new/changed ROMs found".
+        if not _added_rom.is_identified:
+            await _emit_scanning_rom(socket_manager, _added_rom)
         return
 
     path_cover_s, path_cover_l = await fs_resource_handler.get_cover(
@@ -506,19 +523,7 @@ async def _identify_rom(
             if badge_url and badge_path:
                 await fs_resource_handler.store_ra_badge(badge_url, badge_path)
 
-    await socket_manager.emit(
-        "scan:scanning_rom",
-        SimpleRomSchema.from_orm_with_factory(_added_rom).model_dump(
-            exclude={
-                "created_at",
-                "updated_at",
-                "rom_user",
-                "last_modified",
-                "files",
-                "siblings",
-            }
-        ),
-    )
+    await _emit_scanning_rom(socket_manager, _added_rom)
 
 
 async def _identify_platform(

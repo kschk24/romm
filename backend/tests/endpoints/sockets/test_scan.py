@@ -1,10 +1,12 @@
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import socketio
 
+from endpoints.sockets import scan as scan_module
 from endpoints.sockets.scan import (
     ScanStats,
+    _identify_rom,
     _metadata_sources_for_scan_type,
     _should_scan_rom,
     _skip_metadata_phase,
@@ -12,7 +14,9 @@ from endpoints.sockets.scan import (
 from handler.filesystem.roms_handler import FSRomsHandler
 from handler.metadata.base_handler import UniversalPlatformSlug as UPS
 from handler.scan_handler import ScanType
+from models.platform import Platform
 from models.rom import Rom
+from utils.context import initialize_context
 
 
 def test_scan_stats():
@@ -383,3 +387,66 @@ class TestSkipMetadataPhase:
             ScanType.COMPLETE,
         ):
             assert _skip_metadata_phase(scan_type) is False
+
+
+class TestOrganizeScanEmitsFeedback:
+    """An ORGANIZE scan reorganizes discs and adds new (unidentified) .m3u roms
+    to the DB, then short-circuits before the metadata phase. The scan results
+    UI is driven solely by ``scan:scanning_rom`` socket events, so those new
+    roms must still be emitted — otherwise the user sees "No new/changed ROMs
+    found" even though work was done.
+    """
+
+    async def test_organize_emits_scanning_rom_for_new_unidentified_rom(
+        self, platform: Platform, mocker
+    ):
+        mocker.patch.object(scan_module.redis_client, "get", return_value=None)
+        mocker.patch.object(
+            scan_module.fs_rom_handler,
+            "get_rom_files",
+            new=AsyncMock(
+                return_value=Mock(
+                    rom_files=[],
+                    crc_hash="",
+                    md5_hash="",
+                    sha1_hash="",
+                    ra_hash="",
+                )
+            ),
+        )
+        # scan_rom returns the (newly added, unidentified) rom unchanged.
+        mocker.patch.object(
+            scan_module,
+            "scan_rom",
+            new=AsyncMock(side_effect=lambda **kwargs: kwargs["rom"]),
+        )
+
+        socket_manager = AsyncMock()
+        scan_stats = ScanStats()
+
+        fs_rom = {
+            "fs_name": "Final Fantasy VII (USA).m3u",
+            "flat": False,
+            "nested": True,
+            "files": [],
+            "crc_hash": "",
+            "md5_hash": "",
+            "sha1_hash": "",
+            "ra_hash": "",
+        }
+
+        async with initialize_context():
+            await _identify_rom(
+                platform=platform,
+                fs_rom=fs_rom,
+                rom=None,
+                scan_type=ScanType.ORGANIZE,
+                roms_ids=[],
+                metadata_sources=[],
+                launchbox_remote_enabled=False,
+                socket_manager=socket_manager,
+                scan_stats=scan_stats,
+            )
+
+        emitted_events = [call.args[0] for call in socket_manager.emit.call_args_list]
+        assert "scan:scanning_rom" in emitted_events
