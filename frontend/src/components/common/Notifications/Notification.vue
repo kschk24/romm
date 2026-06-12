@@ -10,12 +10,18 @@ const { xs } = useDisplay();
 const snackbarStatus = ref<SnackbarStatus>({ msg: "" });
 const queue = ref<SnackbarStatus[]>([]);
 const notificationStore = storeNotifications();
+// Pending close→open transition timer. Guards against advancing the queue
+// twice (once immediately on a new event, once when this timer fires), which
+// could replace a just-shown snackbar before it had its full display time.
+let advanceTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Event listeners bus
 const emitter = inject<Emitter<Events>>("emitter");
 emitter?.on("snackbarShow", (snackbar: SnackbarStatus) => {
   queue.value.push(snackbar);
-  if (!show.value) showNext();
+  // Only show immediately if nothing is visible and no advance is already
+  // scheduled; otherwise let the existing path drain the queue.
+  if (!show.value && advanceTimer === null) showNext();
 });
 
 function showNext() {
@@ -31,9 +37,12 @@ function showNext() {
 // the timeout (which flips `show` via v-model before firing @timeout), the
 // manual close button, and swipe/esc — so queued snackbars are never dropped.
 watch(show, (visible) => {
-  if (!visible && queue.value.length > 0) {
+  if (!visible && queue.value.length > 0 && advanceTimer === null) {
     // Small gap so the close transition finishes before the next appears.
-    setTimeout(showNext, 300);
+    advanceTimer = setTimeout(() => {
+      advanceTimer = null;
+      showNext();
+    }, 300);
   }
 });
 
