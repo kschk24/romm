@@ -713,7 +713,7 @@ async def scan_platforms(
     if not roms_ids:
         roms_ids = []
 
-    # ORGANIZE only restructures discs + syncs the DB; never query providers.
+    # Force-empty sources for ORGANIZE (see helper docstring).
     metadata_sources = _metadata_sources_for_scan_type(scan_type, metadata_sources)
 
     socket_manager = _get_socket_manager()
