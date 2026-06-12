@@ -202,6 +202,22 @@ def _should_scan_rom(
     return should_scan
 
 
+def _metadata_sources_for_scan_type(
+    scan_type: ScanType,
+    metadata_sources: list[str],
+) -> list[str]:
+    """Return the metadata sources that apply for a given scan type.
+
+    ORGANIZE only restructures discs and syncs the DB, so it must not query
+    any external provider. Every metadata gate in ``scan_rom`` requires the
+    source to be present in ``metadata_sources``, so returning an empty list
+    fully disables metadata fetching.
+    """
+    if scan_type == ScanType.ORGANIZE:
+        return []
+    return metadata_sources
+
+
 def _should_get_rom_files(
     scan_type: ScanType,
     rom: Rom,
@@ -687,6 +703,9 @@ async def scan_platforms(
     """
     if not roms_ids:
         roms_ids = []
+
+    # ORGANIZE only restructures discs + syncs the DB; never query providers.
+    metadata_sources = _metadata_sources_for_scan_type(scan_type, metadata_sources)
 
     socket_manager = _get_socket_manager()
     scan_stats = ScanStats()

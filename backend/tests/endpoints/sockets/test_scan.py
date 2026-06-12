@@ -3,7 +3,11 @@ from unittest.mock import Mock
 import pytest
 import socketio
 
-from endpoints.sockets.scan import ScanStats, _should_scan_rom
+from endpoints.sockets.scan import (
+    ScanStats,
+    _metadata_sources_for_scan_type,
+    _should_scan_rom,
+)
 from handler.filesystem.roms_handler import FSRomsHandler
 from handler.metadata.base_handler import UniversalPlatformSlug as UPS
 from handler.scan_handler import ScanType
@@ -342,3 +346,21 @@ class TestGetPico8CoverUrl:
         assert url is not None
         assert fs_path in url
         assert fs_name in url
+
+
+class TestMetadataSourcesForScanType:
+    def test_organize_clears_sources(self):
+        """ORGANIZE drops all metadata sources so no providers are queried."""
+        assert _metadata_sources_for_scan_type(ScanType.ORGANIZE, ["igdb", "ss"]) == []
+
+    def test_other_scan_types_keep_sources(self):
+        """Non-ORGANIZE scans keep the provided sources unchanged."""
+        for scan_type in (
+            ScanType.NEW_PLATFORMS,
+            ScanType.QUICK,
+            ScanType.UPDATE,
+            ScanType.UNMATCHED,
+            ScanType.COMPLETE,
+            ScanType.HASHES,
+        ):
+            assert _metadata_sources_for_scan_type(scan_type, ["igdb"]) == ["igdb"]
