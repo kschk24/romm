@@ -74,6 +74,12 @@ async def test_merging_scan_stats():
     assert stats.new_firmware == 25
 
 
+def test_organize_scan_type_value():
+    """ORGANIZE scan type exists with the string value 'organize'."""
+    assert ScanType.ORGANIZE == "organize"
+    assert ScanType("organize") is ScanType.ORGANIZE
+
+
 class TestShouldScanRom:
     def test_new_platforms_scan_with_no_rom(self):
         """NEW_PLATFORMS should scan when rom is None"""
