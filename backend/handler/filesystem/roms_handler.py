@@ -729,6 +729,20 @@ class FSRomsHandler(FSHandler):
         except FileNotFoundError:
             return []
 
+        base_resolved = abs_roms_path.resolve()
+
+        def _within_base(p: Path) -> bool:
+            """True only if ``p`` resolves (following all symlinks) to within the
+            platform roms directory. Guards the organize file ops so a symlink
+            planted in the library cannot redirect a move/write outside base.
+            ``validate_path`` is insufficient here: it allows in-base symlinks
+            without resolving their targets."""
+            try:
+                p.resolve().relative_to(base_resolved)
+                return True
+            except (OSError, ValueError):
+                return False
+
         cue_files = [f for f in all_files if f.lower().endswith(".cue")]
 
         # Group .cue files by base name (strip disc tag if present).
@@ -758,6 +772,8 @@ class FSRomsHandler(FSHandler):
             _cues: list[str],
             _all: list[str],
         ) -> None:
+            if _dir.is_symlink() or not _within_base(_dir):
+                return  # refuse to organize through a symlink / outside base
             _dir.mkdir(parents=True, exist_ok=True)
             sorted_cues = sorted(_cues)
             for cue_name in sorted_cues:
@@ -781,6 +797,8 @@ class FSRomsHandler(FSHandler):
                 for sib in sorted(to_move):
                     src = _abs / sib
                     dst = _dir / sib
+                    if not _within_base(dst):
+                        continue
                     if src.exists() and not dst.exists():
                         src.rename(dst)
             _write_playlist(_m3u, _dir, _base, sorted_cues)
@@ -847,6 +865,8 @@ class FSRomsHandler(FSHandler):
             if m3u_path.exists():
                 continue
             dir_path = abs_roms_path / dir_name
+            if dir_path.is_symlink() or not _within_base(dir_path):
+                continue  # don't write an .m3u/noload.txt through a symlink
             try:
                 cue_count = await asyncio.to_thread(
                     _organize_existing_dir, m3u_path, dir_path, dir_name

@@ -1583,6 +1583,29 @@ class TestFSRomsHandler:
                 assert (game_dir / name).exists(), name
                 assert not (roms / name).exists(), name
 
+    @pytest.mark.asyncio
+    async def test_auto_organize_skips_symlinked_subdir(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        # A symlinked directory in the roms folder must not be organized: writing
+        # an .m3u/noload.txt through it would let a planted symlink redirect
+        # writes outside the platform roms directory.
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "Game.cue").write_text("TRACK 01")
+        (roms / "Game").symlink_to(outside, target_is_directory=True)
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        assert "Game" not in result
+        # No playlist created and nothing written into the symlink target.
+        assert not (roms / "Game.m3u").exists()
+        assert not (outside / "noload.txt").exists()
+
     # ── count_roms / get_roms .bin/.img suppression ───────────────────────────
 
     @pytest.mark.asyncio
