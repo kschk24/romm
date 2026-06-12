@@ -59,8 +59,16 @@ RQ_REDIS_HOST=${REDIS_HOST:-127.0.0.1} \
 	--pid /tmp/rq_scheduler.pid &
 
 echo "Starting RQ worker..."
-# Build Redis URL properly — treat only literal "true" as SSL-enabled
-[[ "${REDIS_SSL:-false}" == "true" ]] && _REDIS_SCHEME="rediss" || _REDIS_SCHEME="redis"
+# Build Redis URL properly. Mirror the backend's safe_str_to_bool parser
+# (utils/database.py) so the worker and app agree on what counts as SSL:
+# strip whitespace, lowercase, then match 1/true/yes/on.
+_REDIS_SSL_NORM="${REDIS_SSL:-}"
+_REDIS_SSL_NORM="${_REDIS_SSL_NORM//[[:space:]]/}"
+_REDIS_SSL_NORM="${_REDIS_SSL_NORM,,}"
+case "$_REDIS_SSL_NORM" in
+	1 | true | yes | on) _REDIS_SCHEME="rediss" ;;
+	*) _REDIS_SCHEME="redis" ;;
+esac
 if [[ -n ${REDIS_PASSWORD-} ]]; then
 	REDIS_URL="${_REDIS_SCHEME}://${REDIS_USERNAME-}:${REDIS_PASSWORD}@${REDIS_HOST:-127.0.0.1}:${REDIS_PORT:-6379}/${REDIS_DB:-0}"
 elif [[ -n ${REDIS_USERNAME-} ]]; then
