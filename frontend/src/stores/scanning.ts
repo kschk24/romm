@@ -21,6 +21,7 @@ export default defineStore("scanning", {
     scanning: false,
     scanningPlatforms: [] as ScanningPlatform[],
     scanStats: {} as ScanStats,
+    scanType: "quick",
   }),
 
   actions: {
@@ -30,8 +31,12 @@ export default defineStore("scanning", {
     setScanStats(stats: ScanStats) {
       this.scanStats = stats;
     },
+    setScanType(scanType: string) {
+      this.scanType = scanType;
+    },
     reset() {
       this.scanning = false;
+      this.scanType = "quick";
       this.scanningPlatforms = [] as ScanningPlatform[];
       this.scanStats = {
         total_platforms: 0,
@@ -44,6 +49,7 @@ export default defineStore("scanning", {
         identified_roms: 0,
         scanned_firmware: 0,
         new_firmware: 0,
+        organized_roms: 0,
       };
     },
   },

@@ -143,6 +143,7 @@ const scanType = ref("quick");
 
 async function scan() {
   scanningStore.setScanning(true);
+  scanningStore.setScanType(scanType.value);
   scanningPlatforms.value = [];
 
   if (!socket.connected) socket.connect();
