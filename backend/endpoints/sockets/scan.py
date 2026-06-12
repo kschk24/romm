@@ -218,6 +218,15 @@ def _metadata_sources_for_scan_type(
     return metadata_sources
 
 
+def _skip_metadata_phase(scan_type: ScanType) -> bool:
+    """Whether to skip cover/screenshot/media fetching after a rom is persisted.
+
+    HASHES and ORGANIZE both update the DB entry (and its files) without doing
+    any metadata work, so they return early before the resource-download phase.
+    """
+    return scan_type in {ScanType.HASHES, ScanType.ORGANIZE}
+
+
 def _should_get_rom_files(
     scan_type: ScanType,
     rom: Rom,
@@ -409,8 +418,8 @@ async def _identify_rom(
             ),
         )
 
-    # Short circuit if the scan type is hashes
-    if scan_type == ScanType.HASHES:
+    # Short circuit for scans that don't fetch metadata (hashes, organize)
+    if _skip_metadata_phase(scan_type):
         return
 
     path_cover_s, path_cover_l = await fs_resource_handler.get_cover(

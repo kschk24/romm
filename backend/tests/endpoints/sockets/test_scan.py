@@ -7,6 +7,7 @@ from endpoints.sockets.scan import (
     ScanStats,
     _metadata_sources_for_scan_type,
     _should_scan_rom,
+    _skip_metadata_phase,
 )
 from handler.filesystem.roms_handler import FSRomsHandler
 from handler.metadata.base_handler import UniversalPlatformSlug as UPS
@@ -364,3 +365,21 @@ class TestMetadataSourcesForScanType:
             ScanType.HASHES,
         ):
             assert _metadata_sources_for_scan_type(scan_type, ["igdb"]) == ["igdb"]
+
+
+class TestSkipMetadataPhase:
+    def test_organize_and_hashes_skip(self):
+        """ORGANIZE and HASHES skip the metadata/cover phase."""
+        assert _skip_metadata_phase(ScanType.ORGANIZE) is True
+        assert _skip_metadata_phase(ScanType.HASHES) is True
+
+    def test_metadata_scan_types_do_not_skip(self):
+        """Metadata-fetching scans run the full phase."""
+        for scan_type in (
+            ScanType.NEW_PLATFORMS,
+            ScanType.QUICK,
+            ScanType.UPDATE,
+            ScanType.UNMATCHED,
+            ScanType.COMPLETE,
+        ):
+            assert _skip_metadata_phase(scan_type) is False
