@@ -127,14 +127,21 @@ socket.on("scan:done", () => {
   socket.disconnect();
 
   emitter?.emit("refreshDrawer", null);
-  emitter?.emit("snackbarShow", {
-    msg: "Scan completed successfully!",
-    icon: "mdi-check-bold",
-    color: "green",
-    timeout: 4000,
-  });
 
+  const isOrganize = scanningStore.scanType === "organize";
   const organizedCount = scanningStore.scanStats.organized_roms ?? 0;
+
+  // On an Organize scan the organize result IS the completion message, so
+  // skip the generic toast and show only the organize-specific one.
+  if (!isOrganize) {
+    emitter?.emit("snackbarShow", {
+      msg: "Scan completed successfully!",
+      icon: "mdi-check-bold",
+      color: "green",
+      timeout: 4000,
+    });
+  }
+
   if (organizedCount > 0) {
     emitter?.emit("snackbarShow", {
       msg: t("scan.organized-summary", { n: organizedCount }),
@@ -142,7 +149,7 @@ socket.on("scan:done", () => {
       color: "green",
       timeout: 4000,
     });
-  } else if (scanningStore.scanType === "organize") {
+  } else if (isOrganize) {
     emitter?.emit("snackbarShow", {
       msg: t("scan.organize-none"),
       icon: "mdi-disc",

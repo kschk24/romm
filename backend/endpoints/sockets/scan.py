@@ -266,6 +266,11 @@ async def _emit_reorganized_roms(
     already existed (e.g. a pre-existing folder that only gained a new ``.m3u``)
     are skipped and never emitted. Re-emit every reorganized rom here so they
     all appear; the frontend dedupes by ``rom.id`` so re-emitting is harmless.
+
+    ``auto_organize_loose_discs`` returns directory names (e.g. ``Game``), but
+    once an ``.m3u`` is paired with its sibling directory ``get_roms`` stores
+    the rom under the ``.m3u`` filename (``Game.m3u``). Look the roms up under
+    both forms so the paired ``.m3u`` rom is matched, not just a bare directory.
     """
     if not organized_fs_names:
         return
@@ -275,11 +280,23 @@ async def _emit_reorganized_roms(
         organized_roms=len(organized_fs_names),
     )
 
-    roms_by_fs_name = db_rom_handler.get_roms_by_fs_name(
+    lookup_fs_names = set(organized_fs_names) | {
+        f"{name}.m3u" for name in organized_fs_names
+    }
+    matched_roms = db_rom_handler.get_roms_by_fs_name(
         platform_id=platform.id,
-        fs_names=set(organized_fs_names),
+        fs_names=lookup_fs_names,
     )
-    for rom in roms_by_fs_name.values():
+
+    # ``get_roms_by_fs_name`` only eager-loads ``platform``; the roms it returns
+    # are detached once its session closes. ``_emit_scanning_rom`` serializes
+    # them with ``SimpleRomSchema``, which reads ``files``-derived attributes
+    # (``multi_file``, ``top_level_file_count``, ...) and would raise
+    # ``DetachedInstanceError``. Re-fetch fully-loaded roms before emitting.
+    full_roms = db_rom_handler.get_roms_by_ids(
+        [rom.id for rom in matched_roms.values()]
+    )
+    for rom in full_roms:
         await _emit_scanning_rom(socket_manager, rom)
 
 

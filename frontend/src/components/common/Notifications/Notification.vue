@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Emitter } from "mitt";
-import { inject, ref } from "vue";
+import { inject, ref, watch } from "vue";
 import { useDisplay } from "vuetify";
 import storeNotifications from "@/stores/notifications";
 import type { Events, SnackbarStatus } from "@/types/emitter";
@@ -26,16 +26,20 @@ function showNext() {
   show.value = true;
 }
 
-function closeDialog() {
-  // Ignore duplicate close calls (e.g. manual close + Vuetify @timeout firing
-  // for the same snackbar); otherwise the queue could advance twice and drop one.
-  if (!show.value) return;
-  notificationStore.remove(snackbarStatus.value.id);
-  show.value = false;
-  // Advance to the next queued snackbar after the close transition.
-  if (queue.value.length > 0) {
+// Advance the queue whenever the snackbar closes. Driving this off `show`
+// (rather than the close handler) makes it robust to every close path —
+// the timeout (which flips `show` via v-model before firing @timeout), the
+// manual close button, and swipe/esc — so queued snackbars are never dropped.
+watch(show, (visible) => {
+  if (!visible && queue.value.length > 0) {
+    // Small gap so the close transition finishes before the next appears.
     setTimeout(showNext, 300);
   }
+});
+
+function closeDialog() {
+  notificationStore.remove(snackbarStatus.value.id);
+  show.value = false;
 }
 </script>
 
