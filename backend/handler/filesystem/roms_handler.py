@@ -61,6 +61,13 @@ _DISC_TAG_RE: re.Pattern = re.compile(
     r"\s*[\(\[]\s*dis[ck]\s*\d+\s*[\)\]]", re.IGNORECASE
 )
 
+# Matches the referenced file in a .cue FILE line, quoted or bare:
+#   FILE "Game (Disc 1) (Track 1).bin" BINARY
+#   FILE Game.bin BINARY
+_CUE_FILE_RE: re.Pattern = re.compile(
+    r'^\s*FILE\s+(?:"([^"]+)"|(\S+))', re.IGNORECASE | re.MULTILINE
+)
+
 
 NON_HASHABLE_PLATFORMS = frozenset(
     (
@@ -750,13 +757,25 @@ class FSRomsHandler(FSHandler):
             m3u_lines: list[str] = []
             for cue_name in sorted(_cues):
                 cue_stem = Path(cue_name).stem
-                # Move .cue and every same-stem sibling (e.g. .bin, .img)
-                for sib in _all:
-                    if Path(sib).stem == cue_stem:
-                        src = _abs / sib
-                        dst = _dir / sib
-                        if src.exists() and not dst.exists():
-                            src.rename(dst)
+                # Files to relocate alongside the .cue: every same-stem sibling
+                # (e.g. "Game.bin"/"Game.img") plus every file the .cue
+                # references. Multi-track discs name tracks
+                # "...(Disc 1) (Track 1).bin" whose stem differs from the cue
+                # stem, so same-stem matching alone leaves them at the root.
+                to_move = {sib for sib in _all if Path(sib).stem == cue_stem}
+                try:
+                    cue_text = (_abs / cue_name).read_text(errors="ignore")
+                except OSError:
+                    cue_text = ""
+                for m in _CUE_FILE_RE.finditer(cue_text):
+                    # .cue references are bare names relative to the cue; flatten
+                    # any path components defensively before matching.
+                    to_move.add(Path((m[1] or m[2]).strip()).name)
+                for sib in sorted(to_move):
+                    src = _abs / sib
+                    dst = _dir / sib
+                    if src.exists() and not dst.exists():
+                        src.rename(dst)
                 m3u_lines.append(f"{_base}/{cue_name}")
             (_dir / "noload.txt").write_text("\n")
             _m3u.write_text("\n".join(m3u_lines) + "\n")

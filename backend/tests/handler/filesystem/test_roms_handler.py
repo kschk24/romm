@@ -1302,6 +1302,49 @@ class TestFSRomsHandler:
         assert (game_dir / "noload.txt").exists()
 
     @pytest.mark.asyncio
+    async def test_auto_organize_multi_disc_multi_track(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        # Discs split into multiple .bin tracks: the .cue references
+        # "...(Disc 1) (Track 1).bin" etc. whose stem differs from the cue
+        # stem. All referenced track files must move into the subfolder.
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        for disc in (1, 2):
+            cue = roms / f"Resident Evil 2 (Europe) (Disc {disc}).cue"
+            cue.write_text(
+                f'FILE "Resident Evil 2 (Europe) (Disc {disc}) (Track 1).bin" BINARY\n'
+                "  TRACK 01 MODE2/2352\n"
+                "    INDEX 01 00:00:00\n"
+                f'FILE "Resident Evil 2 (Europe) (Disc {disc}) (Track 2).bin" BINARY\n'
+                "  TRACK 02 AUDIO\n"
+                "    INDEX 01 00:02:00\n"
+            )
+            for track in (1, 2):
+                (
+                    roms
+                    / f"Resident Evil 2 (Europe) (Disc {disc}) (Track {track}).bin"
+                ).write_bytes(b"\x00" * 16)
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        assert result == ["Resident Evil 2 (Europe)"]
+        game_dir = roms / "Resident Evil 2 (Europe)"
+        assert game_dir.is_dir()
+        for disc in (1, 2):
+            for track in (1, 2):
+                name = (
+                    f"Resident Evil 2 (Europe) (Disc {disc}) (Track {track}).bin"
+                )
+                assert (game_dir / name).exists(), name
+                assert not (roms / name).exists(), name
+            cue_name = f"Resident Evil 2 (Europe) (Disc {disc}).cue"
+            assert (game_dir / cue_name).exists()
+        assert (game_dir / "noload.txt").exists()
+
+    @pytest.mark.asyncio
     async def test_auto_organize_multi_disc_with_rev_tag(
         self, tmp_path: Path, psx_platform: Platform
     ):
