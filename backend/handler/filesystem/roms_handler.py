@@ -779,7 +779,11 @@ class FSRomsHandler(FSHandler):
             m3u_path = abs_roms_path / f"{base_name}.m3u"
             dir_path = abs_roms_path / base_name
 
-            if m3u_path.exists() or dir_path.exists():
+            # Only an existing sibling directory means the game is already
+            # organized. A bare ``.m3u`` with no directory is stale (e.g. the
+            # folder was deleted and the discs left loose at the root) and must
+            # not block reorganization — ``_organize`` overwrites it.
+            if dir_path.exists():
                 continue  # already organized
 
             try:
