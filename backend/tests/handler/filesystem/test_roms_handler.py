@@ -1390,6 +1390,61 @@ class TestFSRomsHandler:
         # Untagged file must NOT appear in the disc-tagged group directory
         assert not (game_dir / "game.cue").exists()
 
+    @pytest.mark.asyncio
+    async def test_auto_organize_creates_m3u_for_pre_organized_subdir(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        # Subdir exists with .cue files but no .m3u → m3u must be created.
+        roms = tmp_path / "psx" / "roms"
+        game_dir = roms / "Metal Gear Solid (USA)"
+        game_dir.mkdir(parents=True)
+        (game_dir / "Metal Gear Solid (USA) (Disc 1).cue").write_text("TRACK 01")
+        (game_dir / "Metal Gear Solid (USA) (Disc 2).cue").write_text("TRACK 01")
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        assert result == 1
+        m3u = roms / "Metal Gear Solid (USA).m3u"
+        assert m3u.exists()
+        content = m3u.read_text()
+        assert "Metal Gear Solid (USA)/Metal Gear Solid (USA) (Disc 1).cue" in content
+        assert "Metal Gear Solid (USA)/Metal Gear Solid (USA) (Disc 2).cue" in content
+        assert (game_dir / "noload.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_auto_organize_skips_subdir_with_existing_m3u(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        game_dir = roms / "Silent Hill"
+        game_dir.mkdir(parents=True)
+        (game_dir / "Silent Hill.cue").write_text("TRACK 01")
+        (roms / "Silent Hill.m3u").write_text("Silent Hill/Silent Hill.cue\n")
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_auto_organize_subdir_no_cue_files_skipped(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        roms = tmp_path / "psx" / "roms"
+        saves_dir = roms / "saves"
+        saves_dir.mkdir(parents=True)
+        (saves_dir / "save.mcr").write_bytes(b"\x00")
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        assert result == 0
+        assert not (roms / "saves.m3u").exists()
+
     # ── count_roms / get_roms .bin/.img suppression ───────────────────────────
 
     @pytest.mark.asyncio

@@ -718,8 +718,6 @@ class FSRomsHandler(FSHandler):
             return 0
 
         cue_files = [f for f in all_files if f.lower().endswith(".cue")]
-        if not cue_files:
-            return 0
 
         # Group .cue files by base name (strip disc tag if present).
         # Two-pass: disc-tagged files first so that an untagged "game.cue"
@@ -763,6 +761,19 @@ class FSRomsHandler(FSHandler):
             (_dir / "noload.txt").write_text("\n")
             _m3u.write_text("\n".join(m3u_lines) + "\n")
 
+        def _write_m3u(_m3u: Path, _dir: Path, _dir_name: str) -> int:
+            cues = sorted(
+                f.name for f in _dir.iterdir()
+                if f.is_file() and f.suffix.lower() == ".cue"
+            )
+            if not cues:
+                return 0
+            _m3u.write_text("\n".join(f"{_dir_name}/{c}" for c in cues) + "\n")
+            noload = _dir / "noload.txt"
+            if not noload.exists():
+                noload.write_text("\n")
+            return len(cues)
+
         organized = 0
         for base_name, cue_list in disc_groups.items():
             m3u_path = abs_roms_path / f"{base_name}.m3u"
@@ -783,6 +794,28 @@ class FSRomsHandler(FSHandler):
                 f"→ {hl(f'{base_name}.m3u')}"
             )
             organized += 1
+
+        # Pass 2: subdirectories that already contain .cue files but have no
+        # paired .m3u at the platform root.
+        all_dirs = await self.list_directories(path=rel_roms_path)
+        for dir_name in all_dirs:
+            m3u_path = abs_roms_path / f"{dir_name}.m3u"
+            if m3u_path.exists():
+                continue
+            dir_path = abs_roms_path / dir_name
+            try:
+                cue_count = await asyncio.to_thread(
+                    _write_m3u, m3u_path, dir_path, dir_name
+                )
+            except OSError as e:
+                log.warning(f"Failed to create M3U for {hl(dir_name)}: {e}")
+                continue
+            if cue_count:
+                log.info(
+                    f"Created missing M3U for {hl(dir_name)} ({cue_count} disc(s)) "
+                    f"→ {hl(f'{dir_name}.m3u')}"
+                )
+                organized += 1
 
         return organized
 
