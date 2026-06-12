@@ -69,6 +69,7 @@ class ScanStats:
     identified_roms: int = 0
     scanned_firmware: int = 0
     new_firmware: int = 0
+    organized_roms: int = 0
 
     def __post_init__(self):
         # Lock for thread-safe updates
@@ -105,6 +106,7 @@ class ScanStats:
             "identified_roms": self.identified_roms,
             "scanned_firmware": self.scanned_firmware,
             "new_firmware": self.new_firmware,
+            "organized_roms": self.organized_roms,
         }
 
 

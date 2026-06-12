@@ -29,6 +29,8 @@ def test_scan_stats():
     assert stats.identified_roms == 0
     assert stats.scanned_firmware == 0
     assert stats.new_firmware == 0
+    assert stats.organized_roms == 0
+    assert "organized_roms" in stats.to_dict()
 
     stats.scanned_platforms += 1
     stats.new_platforms += 1
@@ -38,6 +40,7 @@ def test_scan_stats():
     stats.identified_roms += 1
     stats.scanned_firmware += 1
     stats.new_firmware += 1
+    stats.organized_roms += 1
 
     assert stats.scanned_platforms == 1
     assert stats.new_platforms == 1
@@ -47,6 +50,7 @@ def test_scan_stats():
     assert stats.identified_roms == 1
     assert stats.scanned_firmware == 1
     assert stats.new_firmware == 1
+    assert stats.organized_roms == 1
 
 
 async def test_merging_scan_stats():
