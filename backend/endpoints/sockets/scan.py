@@ -283,11 +283,20 @@ async def _emit_reorganized_roms(
     lookup_fs_names = set(organized_fs_names) | {
         f"{name}.m3u" for name in organized_fs_names
     }
-    roms_by_fs_name = db_rom_handler.get_roms_by_fs_name(
+    matched_roms = db_rom_handler.get_roms_by_fs_name(
         platform_id=platform.id,
         fs_names=lookup_fs_names,
     )
-    for rom in roms_by_fs_name.values():
+
+    # ``get_roms_by_fs_name`` only eager-loads ``platform``; the roms it returns
+    # are detached once its session closes. ``_emit_scanning_rom`` serializes
+    # them with ``SimpleRomSchema``, which reads ``files``-derived attributes
+    # (``multi_file``, ``top_level_file_count``, ...) and would raise
+    # ``DetachedInstanceError``. Re-fetch fully-loaded roms before emitting.
+    full_roms = db_rom_handler.get_roms_by_ids(
+        [rom.id for rom in matched_roms.values()]
+    )
+    for rom in full_roms:
         await _emit_scanning_rom(socket_manager, rom)
 
 

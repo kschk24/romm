@@ -462,11 +462,17 @@ class TestEmitReorganizedRoms:
     """
 
     async def test_emits_and_increments_for_organized_roms(self, mocker):
-        rom = Mock()
+        matched = Mock(id=7)
+        full_rom = Mock()
         mocker.patch.object(
             scan_module.db_rom_handler,
             "get_roms_by_fs_name",
-            return_value={"Game": rom},
+            return_value={"Game.m3u": matched},
+        )
+        ids_mock = mocker.patch.object(
+            scan_module.db_rom_handler,
+            "get_roms_by_ids",
+            return_value=[full_rom],
         )
         emit_mock = mocker.patch.object(
             scan_module, "_emit_scanning_rom", new=AsyncMock()
@@ -482,7 +488,9 @@ class TestEmitReorganizedRoms:
         )
 
         assert scan_stats.organized_roms == 1
-        emit_mock.assert_awaited_once_with(socket_manager, rom)
+        # Roms are re-fetched fully-loaded by id before emitting.
+        ids_mock.assert_called_once_with([7])
+        emit_mock.assert_awaited_once_with(socket_manager, full_rom)
 
     async def test_noop_for_empty_list(self, mocker):
         get_mock = mocker.patch.object(
@@ -507,11 +515,17 @@ class TestEmitReorganizedRoms:
         emits fs_name="Game.m3u"). The DB lookup must include that ".m3u" form,
         otherwise the reorganized game is never matched and never emitted.
         """
-        rom = Mock()
+        matched = Mock(id=3)
+        full_rom = Mock()
         get_mock = mocker.patch.object(
             scan_module.db_rom_handler,
             "get_roms_by_fs_name",
-            return_value={"Game.m3u": rom},
+            return_value={"Game.m3u": matched},
+        )
+        mocker.patch.object(
+            scan_module.db_rom_handler,
+            "get_roms_by_ids",
+            return_value=[full_rom],
         )
         emit_mock = mocker.patch.object(
             scan_module, "_emit_scanning_rom", new=AsyncMock()
@@ -528,4 +542,4 @@ class TestEmitReorganizedRoms:
 
         looked_up = get_mock.call_args.kwargs["fs_names"]
         assert "Game.m3u" in looked_up
-        emit_mock.assert_awaited_once_with(socket_manager, rom)
+        emit_mock.assert_awaited_once_with(socket_manager, full_rom)
