@@ -8,19 +8,31 @@ import type { Events, SnackbarStatus } from "@/types/emitter";
 const show = ref(false);
 const { xs } = useDisplay();
 const snackbarStatus = ref<SnackbarStatus>({ msg: "" });
+const queue = ref<SnackbarStatus[]>([]);
 const notificationStore = storeNotifications();
 
 // Event listeners bus
 const emitter = inject<Emitter<Events>>("emitter");
 emitter?.on("snackbarShow", (snackbar: SnackbarStatus) => {
-  show.value = true;
-  snackbarStatus.value = snackbar;
-  snackbarStatus.value.id = notificationStore.notifications.length + 1;
+  queue.value.push(snackbar);
+  if (!show.value) showNext();
 });
+
+function showNext() {
+  const next = queue.value.shift();
+  if (!next) return;
+  snackbarStatus.value = next;
+  snackbarStatus.value.id = notificationStore.notifications.length + 1;
+  show.value = true;
+}
 
 function closeDialog() {
   notificationStore.remove(snackbarStatus.value.id);
   show.value = false;
+  // Advance to the next queued snackbar after the close transition.
+  if (queue.value.length > 0) {
+    setTimeout(showNext, 300);
+  }
 }
 </script>
 
