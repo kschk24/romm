@@ -1302,6 +1302,38 @@ class TestFSRomsHandler:
         assert (game_dir / "noload.txt").exists()
 
     @pytest.mark.asyncio
+    async def test_auto_organize_multi_disc_with_rev_tag(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        # "(Rev N)" after the disc tag must not prevent grouping — regression
+        # for filenames like "Metal Gear Solid (USA) (Disc 1) (Rev 1).cue"
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        (roms / "Metal Gear Solid (USA) (Disc 1) (Rev 1).cue").write_text("TRACK 01")
+        (roms / "Metal Gear Solid (USA) (Disc 1) (Rev 1).bin").write_bytes(b"\x00" * 16)
+        (roms / "Metal Gear Solid (USA) (Disc 2) (Rev 1).cue").write_text("TRACK 01")
+        (roms / "Metal Gear Solid (USA) (Disc 2) (Rev 1).bin").write_bytes(b"\x00" * 16)
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        # Exactly one game organized (not three)
+        assert result == 1
+        game_dir = roms / "Metal Gear Solid (USA) (Rev 1)"
+        m3u = roms / "Metal Gear Solid (USA) (Rev 1).m3u"
+        assert game_dir.is_dir()
+        assert m3u.exists()
+        content = m3u.read_text()
+        assert "Metal Gear Solid (USA) (Disc 1) (Rev 1).cue" in content
+        assert "Metal Gear Solid (USA) (Disc 2) (Rev 1).cue" in content
+        # No stray per-disc dirs/m3us
+        assert not (roms / "Metal Gear Solid (USA) (Disc 1) (Rev 1)").exists()
+        assert not (roms / "Metal Gear Solid (USA) (Disc 2) (Rev 1)").exists()
+        assert not (roms / "Metal Gear Solid (USA) (Disc 1) (Rev 1).m3u").exists()
+        assert not (roms / "Metal Gear Solid (USA) (Disc 2) (Rev 1).m3u").exists()
+
+    @pytest.mark.asyncio
     async def test_auto_organize_idempotent_m3u_exists(
         self, tmp_path: Path, psx_platform: Platform
     ):

@@ -734,6 +734,9 @@ class FSRomsHandler(FSHandler):
                 disc_groups.setdefault(base, []).append(cue)
         for cue in cue_files:
             stem = Path(cue).stem
+            base = _DISC_TAG_RE.sub("", stem).strip()
+            if base != stem:  # disc-tagged → already grouped in first pass
+                continue
             if stem not in disc_groups:
                 disc_groups.setdefault(stem, []).append(cue)
 
