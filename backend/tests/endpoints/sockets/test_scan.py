@@ -454,3 +454,49 @@ class TestOrganizeScanEmitsFeedback:
 
         emitted_events = [call.args[0] for call in socket_manager.emit.call_args_list]
         assert "scan:scanning_rom" in emitted_events
+
+
+class TestEmitReorganizedRoms:
+    """``_emit_reorganized_roms`` re-emits scan:scanning_rom for games that
+    ``auto_organize_loose_discs`` reorganized this run, and counts them.
+    """
+
+    async def test_emits_and_increments_for_organized_roms(self, mocker):
+        rom = Mock()
+        mocker.patch.object(
+            scan_module.db_rom_handler,
+            "get_roms_by_fs_name",
+            return_value={"Game": rom},
+        )
+        emit_mock = mocker.patch.object(
+            scan_module, "_emit_scanning_rom", new=AsyncMock()
+        )
+        socket_manager = AsyncMock()
+        scan_stats = ScanStats()
+
+        await scan_module._emit_reorganized_roms(
+            socket_manager=socket_manager,
+            platform=Mock(id=1),
+            organized_fs_names=["Game"],
+            scan_stats=scan_stats,
+        )
+
+        assert scan_stats.organized_roms == 1
+        emit_mock.assert_awaited_once_with(socket_manager, rom)
+
+    async def test_noop_for_empty_list(self, mocker):
+        get_mock = mocker.patch.object(
+            scan_module.db_rom_handler, "get_roms_by_fs_name"
+        )
+        socket_manager = AsyncMock()
+        scan_stats = ScanStats()
+
+        await scan_module._emit_reorganized_roms(
+            socket_manager=socket_manager,
+            platform=Mock(id=1),
+            organized_fs_names=[],
+            scan_stats=scan_stats,
+        )
+
+        assert scan_stats.organized_roms == 0
+        get_mock.assert_not_called()

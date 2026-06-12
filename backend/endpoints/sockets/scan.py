@@ -253,6 +253,36 @@ async def _emit_scanning_rom(
     )
 
 
+async def _emit_reorganized_roms(
+    socket_manager: socketio.AsyncRedisManager,
+    platform: Platform,
+    organized_fs_names: list[str],
+    scan_stats: ScanStats,
+) -> None:
+    """Surface games reorganized by ``auto_organize_loose_discs`` this run.
+
+    The scan results UI is driven solely by ``scan:scanning_rom`` events. New
+    ``.m3u`` roms are emitted by the normal scan loop, but games whose rom row
+    already existed (e.g. a pre-existing folder that only gained a new ``.m3u``)
+    are skipped and never emitted. Re-emit every reorganized rom here so they
+    all appear; the frontend dedupes by ``rom.id`` so re-emitting is harmless.
+    """
+    if not organized_fs_names:
+        return
+
+    await scan_stats.increment(
+        socket_manager=socket_manager,
+        organized_roms=len(organized_fs_names),
+    )
+
+    roms_by_fs_name = db_rom_handler.get_roms_by_fs_name(
+        platform_id=platform.id,
+        fs_names=set(organized_fs_names),
+    )
+    for rom in roms_by_fs_name.values():
+        await _emit_scanning_rom(socket_manager, rom)
+
+
 def _should_get_rom_files(
     scan_type: ScanType,
     rom: Rom,
@@ -607,7 +637,9 @@ async def _identify_platform(
 
     organized = await fs_rom_handler.auto_organize_loose_discs(platform)
     if organized:
-        log.info(f"Auto-organized {hl(str(organized))} game(s) into M3U structure")
+        log.info(
+            f"Auto-organized {hl(str(len(organized)))} game(s) into M3U structure"
+        )
 
     try:
         fs_roms = await fs_rom_handler.get_roms(platform)
@@ -697,6 +729,13 @@ async def _identify_platform(
         log.warning(f"{hl('Missing')} firmware from filesystem:")
         for f in missing_firmware:
             log.warning(f" - {f}")
+
+    await _emit_reorganized_roms(
+        socket_manager=socket_manager,
+        platform=platform,
+        organized_fs_names=organized,
+        scan_stats=scan_stats,
+    )
 
     return scan_stats
 
