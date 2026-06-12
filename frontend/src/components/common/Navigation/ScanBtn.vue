@@ -157,10 +157,16 @@ socket.on("scan:done", () => {
       timeout: 4000,
     });
   }
+
+  // scanType is only set by the Scan page before an organize scan and is never
+  // otherwise updated. Reset it so it can't leak into the next scan (started
+  // from a drawer/FAB that doesn't set it) and show the wrong completion toast.
+  scanningStore.setScanType("quick");
 });
 
 socket.on("scan:done_ko", (msg) => {
   scanningStore.setScanning(false);
+  scanningStore.setScanType("quick");
 
   emitter?.emit("snackbarShow", {
     msg: `Scan failed: ${msg}`,
