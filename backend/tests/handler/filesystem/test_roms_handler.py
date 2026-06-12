@@ -1528,6 +1528,61 @@ class TestFSRomsHandler:
         assert result == []
         assert not (roms / "saves.m3u").exists()
 
+    @pytest.mark.asyncio
+    async def test_auto_organize_subdir_multiple_games_skipped(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        # A subdir holding .cue files for multiple DISTINCT games (different
+        # base names) must not be bundled into one bogus multi-disc .m3u.
+        roms = tmp_path / "psx" / "roms"
+        misc = roms / "Misc"
+        misc.mkdir(parents=True)
+        (misc / "Game A.cue").write_text("TRACK 01")
+        (misc / "Game B.cue").write_text("TRACK 01")
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        assert result == []
+        assert not (roms / "Misc.m3u").exists()
+
+    @pytest.mark.asyncio
+    async def test_auto_organize_multi_track_unquoted_cue_refs(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        # .cue with UNQUOTED FILE lines whose names contain spaces: the track
+        # name runs up to the trailing track-type keyword (BINARY). Tracks must
+        # still be relocated into the subfolder.
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        for disc in (1, 2):
+            cue = roms / f"Tomb Raider (Disc {disc}).cue"
+            cue.write_text(
+                f"FILE Tomb Raider (Disc {disc}) (Track 1).bin BINARY\n"
+                "  TRACK 01 MODE2/2352\n"
+                "    INDEX 01 00:00:00\n"
+                f"FILE Tomb Raider (Disc {disc}) (Track 2).bin BINARY\n"
+                "  TRACK 02 AUDIO\n"
+                "    INDEX 01 00:02:00\n"
+            )
+            for track in (1, 2):
+                (
+                    roms / f"Tomb Raider (Disc {disc}) (Track {track}).bin"
+                ).write_bytes(b"\x00" * 16)
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        assert result == ["Tomb Raider"]
+        game_dir = roms / "Tomb Raider"
+        for disc in (1, 2):
+            for track in (1, 2):
+                name = f"Tomb Raider (Disc {disc}) (Track {track}).bin"
+                assert (game_dir / name).exists(), name
+                assert not (roms / name).exists(), name
+
     # ── count_roms / get_roms .bin/.img suppression ───────────────────────────
 
     @pytest.mark.asyncio

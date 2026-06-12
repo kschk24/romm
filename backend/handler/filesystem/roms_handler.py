@@ -61,11 +61,16 @@ _DISC_TAG_RE: re.Pattern = re.compile(
     r"\s*[\(\[]\s*dis[ck]\s*\d+\s*[\)\]]", re.IGNORECASE
 )
 
-# Matches the referenced file in a .cue FILE line, quoted or bare:
-#   FILE "Game (Disc 1) (Track 1).bin" BINARY
-#   FILE Game.bin BINARY
+# Matches the referenced file in a .cue FILE line. Three forms, in order:
+#   1. quoted:                FILE "Game (Disc 1) (Track 1).bin" BINARY
+#   2. unquoted with spaces:  FILE Game (Disc 1) (Track 1).bin BINARY
+#      (name runs up to the trailing track-type keyword)
+#   3. unquoted single token: FILE Game.bin BINARY
 _CUE_FILE_RE: re.Pattern = re.compile(
-    r'^\s*FILE\s+(?:"([^"]+)"|(\S+))', re.IGNORECASE | re.MULTILINE
+    r'^\s*FILE\s+(?:"([^"]+)"'
+    r"|(.+?)\s+(?:BINARY|MOTOROLA|AIFF|AIFC|WAVE|MP3|FLAC)\s*$"
+    r"|(\S+))",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 
@@ -754,8 +759,8 @@ class FSRomsHandler(FSHandler):
             _all: list[str],
         ) -> None:
             _dir.mkdir(parents=True, exist_ok=True)
-            m3u_lines: list[str] = []
-            for cue_name in sorted(_cues):
+            sorted_cues = sorted(_cues)
+            for cue_name in sorted_cues:
                 cue_stem = Path(cue_name).stem
                 # Files to relocate alongside the .cue: every same-stem sibling
                 # (e.g. "Game.bin"/"Game.img") plus every file the .cue
@@ -770,27 +775,43 @@ class FSRomsHandler(FSHandler):
                 for m in _CUE_FILE_RE.finditer(cue_text):
                     # .cue references are bare names relative to the cue; flatten
                     # any path components defensively before matching.
-                    to_move.add(Path((m[1] or m[2]).strip()).name)
+                    ref = (m[1] or m[2] or m[3] or "").strip()
+                    if ref:
+                        to_move.add(Path(ref).name)
                 for sib in sorted(to_move):
                     src = _abs / sib
                     dst = _dir / sib
                     if src.exists() and not dst.exists():
                         src.rename(dst)
-                m3u_lines.append(f"{_base}/{cue_name}")
-            (_dir / "noload.txt").write_text("\n")
-            _m3u.write_text("\n".join(m3u_lines) + "\n")
+            _write_playlist(_m3u, _dir, _base, sorted_cues)
 
-        def _write_m3u(_m3u: Path, _dir: Path, _dir_name: str) -> int:
+        def _write_playlist(
+            _m3u: Path, _dir: Path, _dir_name: str, _cue_names: list[str]
+        ) -> None:
+            """Write ``<dir_name>/<cue>`` lines to the .m3u and ensure the
+            sibling dir has a ``noload.txt`` (preserved if it already exists)."""
+            _m3u.write_text(
+                "\n".join(f"{_dir_name}/{c}" for c in _cue_names) + "\n"
+            )
+            noload = _dir / "noload.txt"
+            if not noload.exists():
+                noload.write_text("\n")
+
+        def _organize_existing_dir(_m3u: Path, _dir: Path, _dir_name: str) -> int:
+            """Pair an existing game subdir with a root .m3u. Returns the cue
+            count, 0 if the dir has no .cue files, or -1 if it holds .cue files
+            for multiple distinct games (different base names) and must not be
+            bundled into a single bogus playlist."""
             cues = sorted(
                 f.name for f in _dir.iterdir()
                 if f.is_file() and f.suffix.lower() == ".cue"
             )
             if not cues:
                 return 0
-            _m3u.write_text("\n".join(f"{_dir_name}/{c}" for c in cues) + "\n")
-            noload = _dir / "noload.txt"
-            if not noload.exists():
-                noload.write_text("\n")
+            bases = {_DISC_TAG_RE.sub("", Path(c).stem).strip() for c in cues}
+            if len(bases) > 1:
+                return -1
+            _write_playlist(_m3u, _dir, _dir_name, cues)
             return len(cues)
 
         organized: list[str] = []
@@ -828,10 +849,16 @@ class FSRomsHandler(FSHandler):
             dir_path = abs_roms_path / dir_name
             try:
                 cue_count = await asyncio.to_thread(
-                    _write_m3u, m3u_path, dir_path, dir_name
+                    _organize_existing_dir, m3u_path, dir_path, dir_name
                 )
             except OSError as e:
                 log.warning(f"Failed to create M3U for {hl(dir_name)}: {e}")
+                continue
+            if cue_count == -1:
+                log.warning(
+                    f"Skipped M3U for {hl(dir_name)}: directory holds .cue files "
+                    "for multiple distinct games"
+                )
                 continue
             if cue_count:
                 log.info(
