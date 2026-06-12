@@ -500,3 +500,32 @@ class TestEmitReorganizedRoms:
 
         assert scan_stats.organized_roms == 0
         get_mock.assert_not_called()
+
+    async def test_looks_up_m3u_paired_fs_name(self, mocker):
+        """auto_organize returns the directory name (e.g. "Game"), but the
+        reorganized rom is stored under its paired ".m3u" fs_name (get_roms
+        emits fs_name="Game.m3u"). The DB lookup must include that ".m3u" form,
+        otherwise the reorganized game is never matched and never emitted.
+        """
+        rom = Mock()
+        get_mock = mocker.patch.object(
+            scan_module.db_rom_handler,
+            "get_roms_by_fs_name",
+            return_value={"Game.m3u": rom},
+        )
+        emit_mock = mocker.patch.object(
+            scan_module, "_emit_scanning_rom", new=AsyncMock()
+        )
+        socket_manager = AsyncMock()
+        scan_stats = ScanStats()
+
+        await scan_module._emit_reorganized_roms(
+            socket_manager=socket_manager,
+            platform=Mock(id=1),
+            organized_fs_names=["Game"],
+            scan_stats=scan_stats,
+        )
+
+        looked_up = get_mock.call_args.kwargs["fs_names"]
+        assert "Game.m3u" in looked_up
+        emit_mock.assert_awaited_once_with(socket_manager, rom)
