@@ -1334,9 +1334,13 @@ class TestFSRomsHandler:
         assert not (roms / "Metal Gear Solid (USA) (Disc 2) (Rev 1).m3u").exists()
 
     @pytest.mark.asyncio
-    async def test_auto_organize_idempotent_m3u_exists(
+    async def test_auto_organize_reorganizes_when_only_stale_m3u_exists(
         self, tmp_path: Path, psx_platform: Platform
     ):
+        # A root .m3u with no matching subdirectory is stale (e.g. the folder
+        # was deleted and the discs dropped back at the root). The loose discs
+        # must still be reorganized; the bare .m3u must not block it. Only an
+        # existing sibling directory signals "already organized".
         roms = tmp_path / "psx" / "roms"
         roms.mkdir(parents=True)
         (roms / "Parasite Eve.cue").write_text("TRACK 01")
@@ -1346,9 +1350,45 @@ class TestFSRomsHandler:
         with pytest.MonkeyPatch.context() as m:
             m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
             result = await h.auto_organize_loose_discs(psx_platform)
-        assert result == []
-        # .cue not moved because M3U already existed
-        assert (roms / "Parasite Eve.cue").exists()
+        assert result == ["Parasite Eve"]
+        game_dir = roms / "Parasite Eve"
+        assert game_dir.is_dir()
+        assert (game_dir / "Parasite Eve.cue").exists()
+        # .cue moved into the subfolder; stale .m3u overwritten with correct path
+        assert not (roms / "Parasite Eve.cue").exists()
+        assert "Parasite Eve/Parasite Eve.cue" in (roms / "Parasite Eve.m3u").read_text()
+
+    @pytest.mark.asyncio
+    async def test_auto_organize_multi_disc_with_stale_root_m3u(
+        self, tmp_path: Path, psx_platform: Platform
+    ):
+        # Reported bug: a pre-existing root .m3u must not block reorganizing
+        # loose multi-disc files back into the subfolder layout.
+        roms = tmp_path / "psx" / "roms"
+        roms.mkdir(parents=True)
+        for n in (1, 2, 3):
+            (roms / f"Final Fantasy VII (Europe) (Disc {n}).cue").write_text("TRACK 01")
+            (roms / f"Final Fantasy VII (Europe) (Disc {n}).bin").write_bytes(
+                b"\x00" * 16
+            )
+        (roms / "Final Fantasy VII (Europe).m3u").write_text("stale\n")
+        h = self._psx_handler(tmp_path)
+        cnfg = self._psx_config()
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr("handler.filesystem.roms_handler.cm.get_config", lambda: cnfg)
+            result = await h.auto_organize_loose_discs(psx_platform)
+        assert result == ["Final Fantasy VII (Europe)"]
+        game_dir = roms / "Final Fantasy VII (Europe)"
+        assert game_dir.is_dir()
+        for n in (1, 2, 3):
+            assert (game_dir / f"Final Fantasy VII (Europe) (Disc {n}).cue").exists()
+            assert (game_dir / f"Final Fantasy VII (Europe) (Disc {n}).bin").exists()
+            assert not (roms / f"Final Fantasy VII (Europe) (Disc {n}).cue").exists()
+        content = (roms / "Final Fantasy VII (Europe).m3u").read_text()
+        assert (
+            "Final Fantasy VII (Europe)/Final Fantasy VII (Europe) (Disc 1).cue"
+            in content
+        )
 
     @pytest.mark.asyncio
     async def test_auto_organize_idempotent_dir_exists(
