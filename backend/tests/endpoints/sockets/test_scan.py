@@ -3,7 +3,12 @@ from unittest.mock import Mock
 import pytest
 import socketio
 
-from endpoints.sockets.scan import ScanStats, _should_scan_rom
+from endpoints.sockets.scan import (
+    ScanStats,
+    _metadata_sources_for_scan_type,
+    _should_scan_rom,
+    _skip_metadata_phase,
+)
 from handler.filesystem.roms_handler import FSRomsHandler
 from handler.metadata.base_handler import UniversalPlatformSlug as UPS
 from handler.scan_handler import ScanType
@@ -74,6 +79,12 @@ async def test_merging_scan_stats():
     assert stats.new_firmware == 25
 
 
+def test_organize_scan_type_value():
+    """ORGANIZE scan type exists with the string value 'organize'."""
+    assert ScanType.ORGANIZE == "organize"
+    assert ScanType("organize") is ScanType.ORGANIZE
+
+
 class TestShouldScanRom:
     def test_new_platforms_scan_with_no_rom(self):
         """NEW_PLATFORMS should scan when rom is None"""
@@ -94,6 +105,16 @@ class TestShouldScanRom:
     def test_quick_scan_with_existing_rom(self, rom: Rom):
         """QUICK should not scan when rom exists"""
         result = _should_scan_rom(ScanType.QUICK, rom, [], ["igdb"])
+        assert result is False
+
+    def test_organize_scan_with_no_rom(self):
+        """ORGANIZE should scan (add) when rom is None — the new .m3u entry."""
+        result = _should_scan_rom(ScanType.ORGANIZE, None, [], ["igdb"])
+        assert result is True
+
+    def test_organize_scan_with_existing_rom(self, rom: Rom):
+        """ORGANIZE should not re-scan an existing rom."""
+        result = _should_scan_rom(ScanType.ORGANIZE, rom, [], ["igdb"])
         assert result is False
 
     # Test COMPLETE scan type
@@ -326,3 +347,39 @@ class TestGetPico8CoverUrl:
         assert url is not None
         assert fs_path in url
         assert fs_name in url
+
+
+class TestMetadataSourcesForScanType:
+    def test_organize_clears_sources(self):
+        """ORGANIZE drops all metadata sources so no providers are queried."""
+        assert _metadata_sources_for_scan_type(ScanType.ORGANIZE, ["igdb", "ss"]) == []
+
+    def test_other_scan_types_keep_sources(self):
+        """Non-ORGANIZE scans keep the provided sources unchanged."""
+        for scan_type in (
+            ScanType.NEW_PLATFORMS,
+            ScanType.QUICK,
+            ScanType.UPDATE,
+            ScanType.UNMATCHED,
+            ScanType.COMPLETE,
+            ScanType.HASHES,
+        ):
+            assert _metadata_sources_for_scan_type(scan_type, ["igdb"]) == ["igdb"]
+
+
+class TestSkipMetadataPhase:
+    def test_organize_and_hashes_skip(self):
+        """ORGANIZE and HASHES skip the metadata/cover phase."""
+        assert _skip_metadata_phase(ScanType.ORGANIZE) is True
+        assert _skip_metadata_phase(ScanType.HASHES) is True
+
+    def test_metadata_scan_types_do_not_skip(self):
+        """Metadata-fetching scans run the full phase."""
+        for scan_type in (
+            ScanType.NEW_PLATFORMS,
+            ScanType.QUICK,
+            ScanType.UPDATE,
+            ScanType.UNMATCHED,
+            ScanType.COMPLETE,
+        ):
+            assert _skip_metadata_phase(scan_type) is False

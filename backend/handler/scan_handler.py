@@ -63,6 +63,7 @@ class ScanType(enum.StrEnum):
     UNMATCHED = "unmatched"
     COMPLETE = "complete"
     HASHES = "hashes"
+    ORGANIZE = "organize"
 
 
 @enum.unique

@@ -167,7 +167,10 @@ def _should_scan_rom(
     # This logic is tricky so only touch it if you know what you're doing"""
     should_scan = bool(
         # Any new roms should be scanned
-        (scan_type in {ScanType.NEW_PLATFORMS, ScanType.QUICK} and not rom)
+        (
+            scan_type in {ScanType.NEW_PLATFORMS, ScanType.QUICK, ScanType.ORGANIZE}
+            and not rom
+        )
         # Complete rescan should scan all roms
         or (scan_type == ScanType.COMPLETE)
         # Hashes rescan should scan all roms to update the hashes
@@ -197,6 +200,31 @@ def _should_scan_rom(
     )
 
     return should_scan
+
+
+def _metadata_sources_for_scan_type(
+    scan_type: ScanType,
+    metadata_sources: list[str],
+) -> list[str]:
+    """Return the metadata sources that apply for a given scan type.
+
+    ORGANIZE only restructures discs and syncs the DB, so it must not query
+    any external provider. Every metadata gate in ``scan_rom`` requires the
+    source to be present in ``metadata_sources``, so returning an empty list
+    fully disables metadata fetching.
+    """
+    if scan_type == ScanType.ORGANIZE:
+        return []
+    return metadata_sources
+
+
+def _skip_metadata_phase(scan_type: ScanType) -> bool:
+    """Whether to skip cover/screenshot/media fetching after a rom is persisted.
+
+    HASHES and ORGANIZE both update the DB entry (and its files) without doing
+    any metadata work, so they return early before the resource-download phase.
+    """
+    return scan_type in {ScanType.HASHES, ScanType.ORGANIZE}
 
 
 def _should_get_rom_files(
@@ -390,8 +418,8 @@ async def _identify_rom(
             ),
         )
 
-    # Short circuit if the scan type is hashes
-    if scan_type == ScanType.HASHES:
+    # Short circuit for scans that don't fetch metadata (hashes, organize)
+    if _skip_metadata_phase(scan_type):
         return
 
     path_cover_s, path_cover_l = await fs_resource_handler.get_cover(
@@ -684,6 +712,9 @@ async def scan_platforms(
     """
     if not roms_ids:
         roms_ids = []
+
+    # Force-empty sources for ORGANIZE (see helper docstring).
+    metadata_sources = _metadata_sources_for_scan_type(scan_type, metadata_sources)
 
     socket_manager = _get_socket_manager()
     scan_stats = ScanStats()
