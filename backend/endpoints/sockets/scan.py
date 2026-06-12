@@ -167,7 +167,10 @@ def _should_scan_rom(
     # This logic is tricky so only touch it if you know what you're doing"""
     should_scan = bool(
         # Any new roms should be scanned
-        (scan_type in {ScanType.NEW_PLATFORMS, ScanType.QUICK} and not rom)
+        (
+            scan_type in {ScanType.NEW_PLATFORMS, ScanType.QUICK, ScanType.ORGANIZE}
+            and not rom
+        )
         # Complete rescan should scan all roms
         or (scan_type == ScanType.COMPLETE)
         # Hashes rescan should scan all roms to update the hashes

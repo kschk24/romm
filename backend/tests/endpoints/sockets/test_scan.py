@@ -102,6 +102,16 @@ class TestShouldScanRom:
         result = _should_scan_rom(ScanType.QUICK, rom, [], ["igdb"])
         assert result is False
 
+    def test_organize_scan_with_no_rom(self):
+        """ORGANIZE should scan (add) when rom is None — the new .m3u entry."""
+        result = _should_scan_rom(ScanType.ORGANIZE, None, [], ["igdb"])
+        assert result is True
+
+    def test_organize_scan_with_existing_rom(self, rom: Rom):
+        """ORGANIZE should not re-scan an existing rom."""
+        result = _should_scan_rom(ScanType.ORGANIZE, rom, [], ["igdb"])
+        assert result is False
+
     # Test COMPLETE scan type
     def test_complete_scan_always_scans(self, rom: Rom):
         """COMPLETE should scan everything when unscoped, but respect roms_ids when scoped"""
